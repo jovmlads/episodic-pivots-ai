@@ -1,6 +1,6 @@
 # Episodic Pivot
 
-AI-powered gap and pre-market stock scanner with catalyst analysis.
+A production-grade, end-to-end AI engineering project — full-stack web application backed by a multi-agent LLM pipeline that screens pre-market stock movers, classifies catalysts, streams structured analysis in real-time, and surfaces historically similar setups via RAG. Designed with explicit attention to eval metrics, token cost controls, error isolation, RLS-enforced security, vector search performance, and horizontal scalability.
 
 ---
 
