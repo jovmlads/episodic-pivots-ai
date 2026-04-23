@@ -1,6 +1,24 @@
 # AI Episodic Pivot
 
-A production-grade, end-to-end AI engineering project — full-stack web application backed by a multi-agent LLM pipeline that screens pre-market stock movers, classifies catalysts, streams structured analysis in real-time, and surfaces historically similar setups via RAG. Includes Stripe-gated subscription billing, webhook-driven status sync, and a 14-day trial flow. Designed with explicit attention to eval metrics, token cost controls, error isolation, RLS-enforced security, vector search performance, and horizontal scalability.
+## Overview
+
+End-to-end intelligent AI system for analyzing pre-market stock movers, built around a multi-agent LLM pipeline and a full-stack web application.
+
+The platform ingests market signals, classifies catalysts, streams structured outputs, and retrieves similar historical setups via RAG to support time-sensitive decision making.
+
+## Architecture
+
+The system architecture is designed with production constraints in mind:
+
+- event-driven pipeline with clear agent boundaries
+- cost-aware LLM orchestration and token usage controls
+- evaluation layer for output quality and consistency
+- fault isolation across agents and external services
+- vector search tuned for retrieval accuracy and latency
+- Stripe-based subscriptions with webhook-driven state sync
+- row-level security (RLS) for multi-tenant data isolation
+
+Built with a focus on practical trade-offs between latency, cost, and model accuracy — not just feature completeness.
 
 ---
 
@@ -28,6 +46,7 @@ Browser
 ```
 
 **Why this split:**
+
 - `tradingview-scraper` is Python-only — FastAPI owns all Python logic rather than shelling out from Node
 - Next.js handles auth UI and proxies SSE server-side so the browser never holds API credentials
 - Supabase is one platform for auth, data, vectors, and RLS — no separate identity provider or vector DB
@@ -50,35 +69,35 @@ User trigger / APScheduler cron
 
 ## System Design & Rationale
 
-| Decision | Choice | Rationale |
-|---|---|---|
-| AI parallelism | `asyncio.gather` per ticker | Cuts analysis time from O(n×latency) to O(latency). 20 tickers ≈ same wall time as 1 |
-| Streaming | SSE (server-sent events) | One-directional, HTTP/1.1 compatible, no WebSocket infra. Next.js proxies transparently |
-| Scheduling | APScheduler in-process | No Redis/Celery overhead for MVP. Jobs reload from DB on startup. Swap to Celery for scale |
-| Embeddings | OpenAI text-embedding-3-small | 1536 dims, $0.02/1M tokens. Abstracts behind a service function — swappable |
-| RAG index | pgvector IVFFlat (lists=100) | Good recall/speed for <1M rows without separate vector DB. Upgrade to HNSW at scale |
-| Token control | Per-user monthly budget in DB | Prevents runaway cost per user without a separate billing micro-service |
-| Auth boundary | X-User-Id set server-side only | FastAPI never exposed to browser. Auth validated by Next.js before proxying |
-| Trial/billing | Stripe checkout sessions + webhooks | No custom payment logic. Webhook drives DB state — idempotent |
+| Decision       | Choice                              | Rationale                                                                                  |
+| -------------- | ----------------------------------- | ------------------------------------------------------------------------------------------ |
+| AI parallelism | `asyncio.gather` per ticker         | Cuts analysis time from O(n×latency) to O(latency). 20 tickers ≈ same wall time as 1       |
+| Streaming      | SSE (server-sent events)            | One-directional, HTTP/1.1 compatible, no WebSocket infra. Next.js proxies transparently    |
+| Scheduling     | APScheduler in-process              | No Redis/Celery overhead for MVP. Jobs reload from DB on startup. Swap to Celery for scale |
+| Embeddings     | OpenAI text-embedding-3-small       | 1536 dims, $0.02/1M tokens. Abstracts behind a service function — swappable                |
+| RAG index      | pgvector IVFFlat (lists=100)        | Good recall/speed for <1M rows without separate vector DB. Upgrade to HNSW at scale        |
+| Token control  | Per-user monthly budget in DB       | Prevents runaway cost per user without a separate billing micro-service                    |
+| Auth boundary  | X-User-Id set server-side only      | FastAPI never exposed to browser. Auth validated by Next.js before proxying                |
+| Trial/billing  | Stripe checkout sessions + webhooks | No custom payment logic. Webhook drives DB state — idempotent                              |
 
 ---
 
 ## Tech Stack & Selection Decisions
 
-| Layer | Technology | Version | Decision |
-|---|---|---|---|
-| Frontend | Next.js (App Router) | 15 | SSR for auth, native streaming support, Vercel zero-config deploy |
-| Backend | FastAPI | 0.115 | Async-native Python, OpenAPI docs, pydantic validation, fastest Python framework |
-| AI agents | Anthropic SDK | 0.40 | Structured tool use (forces valid JSON output), native streaming, web_search tool |
-| Embeddings | OpenAI text-embedding-3-small | — | Cheapest high-quality embedding; pgvector-compatible 1536 dims |
-| Database | Supabase (Postgres 15) | — | pgvector built-in, Auth + RLS, instant REST/realtime, no self-host overhead |
-| Vector search | pgvector | 0.3.6 | Embedded in Postgres — no separate infra, transactional consistency with data |
-| Scheduling | APScheduler | 3.10 | In-process async scheduler, cron triggers, minimal infra. Swappable to Celery |
-| Scraping | tradingview-scraper | 0.3.9 | Only Python library with pre-market fields (premarket_change, premarket_volume, etc.) |
-| Payments | Stripe | 17 | Industry standard, Checkout Sessions handle PCI compliance, webhooks are reliable |
-| Email | Resend | 2.4 | SPF/DKIM handled, generous free tier, dead-simple Python API |
-| Containerisation | Docker + Compose | — | Reproducible local stack, Railway accepts Docker images directly |
-| Deployment | Vercel + Railway | — | Zero-ops. Vercel for Next.js native; Railway for Docker with env management |
+| Layer            | Technology                    | Version | Decision                                                                              |
+| ---------------- | ----------------------------- | ------- | ------------------------------------------------------------------------------------- |
+| Frontend         | Next.js (App Router)          | 15      | SSR for auth, native streaming support, Vercel zero-config deploy                     |
+| Backend          | FastAPI                       | 0.115   | Async-native Python, OpenAPI docs, pydantic validation, fastest Python framework      |
+| AI agents        | Anthropic SDK                 | 0.40    | Structured tool use (forces valid JSON output), native streaming, web_search tool     |
+| Embeddings       | OpenAI text-embedding-3-small | —       | Cheapest high-quality embedding; pgvector-compatible 1536 dims                        |
+| Database         | Supabase (Postgres 15)        | —       | pgvector built-in, Auth + RLS, instant REST/realtime, no self-host overhead           |
+| Vector search    | pgvector                      | 0.3.6   | Embedded in Postgres — no separate infra, transactional consistency with data         |
+| Scheduling       | APScheduler                   | 3.10    | In-process async scheduler, cron triggers, minimal infra. Swappable to Celery         |
+| Scraping         | tradingview-scraper           | 0.3.9   | Only Python library with pre-market fields (premarket_change, premarket_volume, etc.) |
+| Payments         | Stripe                        | 17      | Industry standard, Checkout Sessions handle PCI compliance, webhooks are reliable     |
+| Email            | Resend                        | 2.4     | SPF/DKIM handled, generous free tier, dead-simple Python API                          |
+| Containerisation | Docker + Compose              | —       | Reproducible local stack, Railway accepts Docker images directly                      |
+| Deployment       | Vercel + Railway              | —       | Zero-ops. Vercel for Next.js native; Railway for Docker with env management           |
 
 ---
 
@@ -92,12 +111,12 @@ User trigger / APScheduler cron
 
 #### Tests
 
-| Type | What | Location |
-|---|---|---|
-| Unit | `_parse_rows()` with valid, empty, malformed input | `tests/test_screener.py` |
-| Unit | `run_screener()` success + screener API failure | `tests/test_screener.py` |
-| Mock | Screener class mocked — no live TradingView calls in CI | `conftest.py` |
-| Integration | Live screener call with real cookie (manual, pre-market hours) | Run manually |
+| Type        | What                                                           | Location                 |
+| ----------- | -------------------------------------------------------------- | ------------------------ |
+| Unit        | `_parse_rows()` with valid, empty, malformed input             | `tests/test_screener.py` |
+| Unit        | `run_screener()` success + screener API failure                | `tests/test_screener.py` |
+| Mock        | Screener class mocked — no live TradingView calls in CI        | `conftest.py`            |
+| Integration | Live screener call with real cookie (manual, pre-market hours) | Run manually             |
 
 #### Performance metrics
 
@@ -129,6 +148,7 @@ User trigger / APScheduler cron
 ### 2. AI Layer (`apps/api/app/agents/`)
 
 **Agents:**
+
 - `news_analyser.py` — catalyst classification per ticker
 - `news_orchestrator.py` — fan-out, SSE streaming, persist, email
 - `screener_config_producer.py` — NL → validated screener config
@@ -136,26 +156,27 @@ User trigger / APScheduler cron
 
 #### Tests
 
-| Type | What | Location |
-|---|---|---|
-| Unit | Token tracker budget check, exhausted, 80% warning | `tests/test_token_tracker.py` |
-| Unit | `_parse_rows`, `_extract_json` edge cases | `tests/test_screener.py` |
-| Integration | Live Claude call with real `ANTHROPIC_API_KEY` (manual) | Run manually against staging |
-| Eval | Catalyst classification accuracy on known fixtures (see below) | Manual eval suite |
+| Type        | What                                                           | Location                      |
+| ----------- | -------------------------------------------------------------- | ----------------------------- |
+| Unit        | Token tracker budget check, exhausted, 80% warning             | `tests/test_token_tracker.py` |
+| Unit        | `_parse_rows`, `_extract_json` edge cases                      | `tests/test_screener.py`      |
+| Integration | Live Claude call with real `ANTHROPIC_API_KEY` (manual)        | Run manually against staging  |
+| Eval        | Catalyst classification accuracy on known fixtures (see below) | Manual eval suite             |
 
 **AI Eval metrics** (run manually against a labelled set of 50 news articles):
 
-| Metric | Target | Method |
-|---|---|---|
-| Catalyst type accuracy | ≥85% | Compare model output vs human label on fixture set |
-| Signal correctness | ≥80% | `strong_buy`/`buy` on genuine catalysts, `skip` on dilution |
-| False positive rate (noise → buy) | <10% | Labelled "no catalyst" articles should return `skip` |
-| Dilution detection rate | ≥95% | ATM/direct offering articles must return `skip` |
-| Web search fallback recall | ≥70% | % of no-news tickers where search finds a valid reason |
-| Latency per ticker (p50) | <5 s | Measured via token usage logs |
-| Latency per ticker (p95) | <12 s | |
+| Metric                            | Target | Method                                                      |
+| --------------------------------- | ------ | ----------------------------------------------------------- |
+| Catalyst type accuracy            | ≥85%   | Compare model output vs human label on fixture set          |
+| Signal correctness                | ≥80%   | `strong_buy`/`buy` on genuine catalysts, `skip` on dilution |
+| False positive rate (noise → buy) | <10%   | Labelled "no catalyst" articles should return `skip`        |
+| Dilution detection rate           | ≥95%   | ATM/direct offering articles must return `skip`             |
+| Web search fallback recall        | ≥70%   | % of no-news tickers where search finds a valid reason      |
+| Latency per ticker (p50)          | <5 s   | Measured via token usage logs                               |
+| Latency per ticker (p95)          | <12 s  |                                                             |
 
 Run eval:
+
 ```bash
 # Place fixture JSON in tests/fixtures/catalyst_eval.json
 # Format: [{"news_text": "...", "expected_catalyst": "earnings_beat", "expected_signal": "strong_buy"}]
@@ -186,6 +207,7 @@ cd apps/api && python -m pytest tests/test_eval.py -v
 #### Eval metrics tracking
 
 Log these fields to `ai_analyses` table per call: `tokens_input`, `tokens_output`, `catalyst_type`, `trading_signal`, `web_search_used`. Run aggregate queries to track:
+
 ```sql
 -- Signal distribution
 select trading_signal, count(*) from ai_analyses group by 1 order by 2 desc;
@@ -212,25 +234,25 @@ select avg(web_search_used::int) as fallback_rate from ai_analyses;
 
 #### Tests
 
-| Type | What |
-|---|---|
-| Migration | Apply both migrations to a fresh DB, verify schema |
-| RLS | Each policy tested: users cannot query other users' rows |
-| Trigger | `handle_new_user()` fires on `auth.users` insert, creates profile |
-| RPC | `match_analyses()` returns correct rows, respects `user_id_filter`, excludes self |
-| Index | `EXPLAIN ANALYZE` on vector similarity query — confirms IVFFlat index used |
+| Type      | What                                                                              |
+| --------- | --------------------------------------------------------------------------------- |
+| Migration | Apply both migrations to a fresh DB, verify schema                                |
+| RLS       | Each policy tested: users cannot query other users' rows                          |
+| Trigger   | `handle_new_user()` fires on `auth.users` insert, creates profile                 |
+| RPC       | `match_analyses()` returns correct rows, respects `user_id_filter`, excludes self |
+| Index     | `EXPLAIN ANALYZE` on vector similarity query — confirms IVFFlat index used        |
 
 Run RLS tests via Supabase dashboard → SQL editor, or `supabase test db`.
 
 #### Performance metrics
 
-| Query | Target | Notes |
-|---|---|---|
-| `scan_results` insert (20 rows) | <100 ms | Batch insert |
-| `ai_analyses` insert | <50 ms | Single row |
-| `match_analyses()` RPC | <200 ms | IVFFlat on 100K rows |
-| `scan_runs` list (user, last 20) | <30 ms | Index on `(user_id, created_at desc)` |
-| `token_usage` upsert | <20 ms | Unique constraint on `(user_id, month_year)` |
+| Query                            | Target  | Notes                                        |
+| -------------------------------- | ------- | -------------------------------------------- |
+| `scan_results` insert (20 rows)  | <100 ms | Batch insert                                 |
+| `ai_analyses` insert             | <50 ms  | Single row                                   |
+| `match_analyses()` RPC           | <200 ms | IVFFlat on 100K rows                         |
+| `scan_runs` list (user, last 20) | <30 ms  | Index on `(user_id, created_at desc)`        |
+| `token_usage` upsert             | <20 ms  | Unique constraint on `(user_id, month_year)` |
 
 Monitor slow queries via Supabase Dashboard → Database → Query Performance.
 
@@ -265,69 +287,77 @@ Monitor slow queries via Supabase Dashboard → Database → Query Performance.
 #### Tests
 
 **Unit / Component:**
+
 ```bash
 # Add Vitest + React Testing Library for component tests
 cd apps/web && npm install -D vitest @testing-library/react @testing-library/user-event
 ```
 
-| Type | What |
-|---|---|
+| Type      | What                                                       |
+| --------- | ---------------------------------------------------------- |
 | Component | `ScanDashboard` renders results table from mock SSE events |
-| Component | `ScreenerSettings` menu form builds correct filter array |
-| Unit | `formatPct`, `signalColor`, `isTrialActive` utilities |
-| Unit | Middleware redirect logic (unauthenticated, trial expired) |
+| Component | `ScreenerSettings` menu form builds correct filter array   |
+| Unit      | `formatPct`, `signalColor`, `isTrialActive` utilities      |
+| Unit      | Middleware redirect logic (unauthenticated, trial expired) |
 
 **E2E (Playwright):**
+
 ```bash
 cd apps/web && npm test
 ```
 
-| Test | File |
-|---|---|
-| Login page renders, unauthenticated redirect | `tests/e2e/auth.spec.ts` |
-| Invalid login shows toast error | `tests/e2e/auth.spec.ts` |
-| Dashboard visible after login | Add: `tests/e2e/dashboard.spec.ts` |
-| Screener config save (menu) | Add: `tests/e2e/settings.spec.ts` |
-| AI chat returns streamed response | Add: `tests/e2e/settings.spec.ts` |
-| History page shows past runs | Add: `tests/e2e/history.spec.ts` |
-| Billing redirect on expired trial | Add: `tests/e2e/billing.spec.ts` |
+| Test                                         | File                               |
+| -------------------------------------------- | ---------------------------------- |
+| Login page renders, unauthenticated redirect | `tests/e2e/auth.spec.ts`           |
+| Invalid login shows toast error              | `tests/e2e/auth.spec.ts`           |
+| Dashboard visible after login                | Add: `tests/e2e/dashboard.spec.ts` |
+| Screener config save (menu)                  | Add: `tests/e2e/settings.spec.ts`  |
+| AI chat returns streamed response            | Add: `tests/e2e/settings.spec.ts`  |
+| History page shows past runs                 | Add: `tests/e2e/history.spec.ts`   |
+| Billing redirect on expired trial            | Add: `tests/e2e/billing.spec.ts`   |
 
 #### Performance metrics
 
-| Metric | Target | Method |
-|---|---|---|
-| Time to first byte (TTFB) | <200 ms | Vercel Edge network |
-| Dashboard page load (LCP) | <1.5 s | Next.js server components, no client waterfall |
-| SSE first result latency | <5 s | From trigger click to first ticker result |
-| SSE total scan time (20 tickers) | <15 s | Parallel AI analysis |
-| Lighthouse performance score | ≥85 | Run: `npx lighthouse https://your-domain.com` |
+| Metric                           | Target  | Method                                         |
+| -------------------------------- | ------- | ---------------------------------------------- |
+| Time to first byte (TTFB)        | <200 ms | Vercel Edge network                            |
+| Dashboard page load (LCP)        | <1.5 s  | Next.js server components, no client waterfall |
+| SSE first result latency         | <5 s    | From trigger click to first ticker result      |
+| SSE total scan time (20 tickers) | <15 s   | Parallel AI analysis                           |
+| Lighthouse performance score     | ≥85     | Run: `npx lighthouse https://your-domain.com`  |
 
 Monitor via Vercel Analytics (enable in project settings).
 
 #### Security
 
-| Measure | Detail |
-|---|---|
-| Auth | Supabase JWT, validated server-side in middleware and API routes |
-| API credential isolation | `X-User-Id` set by Next.js API route — browser never calls FastAPI directly |
-| CSRF | Next.js App Router uses SameSite cookies — CSRF not applicable to API routes |
-| XSS | React escapes all rendered content. `dangerouslySetInnerHTML` not used |
-| Stripe | Webhook signature verified with `STRIPE_WEBHOOK_SECRET` before processing |
-| Secrets | All keys in server-side env vars. `NEXT_PUBLIC_*` contains only publishable keys |
-| Headers | Add `next.config.ts` security headers (CSP, HSTS, X-Frame-Options) for production |
-| Trial gate | Middleware enforces trial/subscription check — cannot be bypassed by URL manipulation |
+| Measure                  | Detail                                                                                |
+| ------------------------ | ------------------------------------------------------------------------------------- |
+| Auth                     | Supabase JWT, validated server-side in middleware and API routes                      |
+| API credential isolation | `X-User-Id` set by Next.js API route — browser never calls FastAPI directly           |
+| CSRF                     | Next.js App Router uses SameSite cookies — CSRF not applicable to API routes          |
+| XSS                      | React escapes all rendered content. `dangerouslySetInnerHTML` not used                |
+| Stripe                   | Webhook signature verified with `STRIPE_WEBHOOK_SECRET` before processing             |
+| Secrets                  | All keys in server-side env vars. `NEXT_PUBLIC_*` contains only publishable keys      |
+| Headers                  | Add `next.config.ts` security headers (CSP, HSTS, X-Frame-Options) for production     |
+| Trial gate               | Middleware enforces trial/subscription check — cannot be bypassed by URL manipulation |
 
 **Recommended security headers** (add to `next.config.ts`):
+
 ```ts
-headers: async () => [{
-  source: '/(.*)',
-  headers: [
-    { key: 'X-Frame-Options', value: 'DENY' },
-    { key: 'X-Content-Type-Options', value: 'nosniff' },
-    { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-    { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains' },
-  ],
-}]
+headers: async () => [
+  {
+    source: "/(.*)",
+    headers: [
+      { key: "X-Frame-Options", value: "DENY" },
+      { key: "X-Content-Type-Options", value: "nosniff" },
+      { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+      {
+        key: "Strict-Transport-Security",
+        value: "max-age=63072000; includeSubDomains",
+      },
+    ],
+  },
+];
 ```
 
 #### Error handling
@@ -392,6 +422,7 @@ Events to enable: `checkout.session.completed`, `customer.subscription.*`
 ### GitHub Actions
 
 **`.github/workflows/api.yml`** — runs on push to `main` and PRs:
+
 ```yaml
 - Lint: ruff check apps/api/
 - Type check: mypy apps/api/ --ignore-missing-imports
@@ -401,6 +432,7 @@ Events to enable: `checkout.session.completed`, `customer.subscription.*`
 ```
 
 **`.github/workflows/web.yml`** — runs on push to `main` and PRs:
+
 ```yaml
 - Lint: next lint
 - Type check: tsc --noEmit
@@ -410,6 +442,7 @@ Events to enable: `checkout.session.completed`, `customer.subscription.*`
 ```
 
 **Required secrets** (`Settings → Secrets → Actions`):
+
 ```
 ANTHROPIC_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
 RAILWAY_TOKEN, VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID
@@ -442,6 +475,7 @@ docker compose up  # starts api:8000 + web:3000
 API docs: [http://localhost:8000/docs](http://localhost:8000/docs)
 
 **Run tests:**
+
 ```bash
 # API
 cd apps/api && pip install -r requirements.txt && pytest tests/ -v
@@ -454,8 +488,8 @@ cd apps/web && npm install && npx playwright install chromium && npm test
 
 ## Claude Code Skills (developer CLI)
 
-| Skill | Usage | What it does |
-|---|---|---|
-| `/analyse TICKER [pct]` | `/analyse AAPL 5.2` | Runs news analyser agent from terminal |
-| `/screen "criteria"` | `/screen "PM gainers >5% float <20M Nasdaq"` | NL → screener config |
-| `/similar result_id user_id` | `/similar abc-123 user-456` | RAG similarity search |
+| Skill                        | Usage                                        | What it does                           |
+| ---------------------------- | -------------------------------------------- | -------------------------------------- |
+| `/analyse TICKER [pct]`      | `/analyse AAPL 5.2`                          | Runs news analyser agent from terminal |
+| `/screen "criteria"`         | `/screen "PM gainers >5% float <20M Nasdaq"` | NL → screener config                   |
+| `/similar result_id user_id` | `/similar abc-123 user-456`                  | RAG similarity search                  |
