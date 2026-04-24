@@ -1,7 +1,14 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart2, Clock, Settings, Bell, LogOut } from "lucide-react";
+import {
+  BarChart2,
+  Clock,
+  Settings,
+  Bell,
+  LogOut,
+  CreditCard,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 
@@ -13,7 +20,12 @@ const nav = [
 ];
 
 interface Props {
-  profile: { email: string; is_admin: boolean; trial_ends_at: string } | null;
+  profile: {
+    email: string;
+    is_admin: boolean;
+    trial_ends_at: string;
+    stripe_status?: string | null;
+  } | null;
 }
 
 export default function Sidebar({ profile }: Props) {
@@ -28,7 +40,12 @@ export default function Sidebar({ profile }: Props) {
   }
 
   const trialDaysLeft = profile
-    ? Math.max(0, Math.ceil((new Date(profile.trial_ends_at).getTime() - Date.now()) / 86400000))
+    ? Math.max(
+        0,
+        Math.ceil(
+          (new Date(profile.trial_ends_at).getTime() - Date.now()) / 86400000,
+        ),
+      )
     : 0;
 
   return (
@@ -46,7 +63,7 @@ export default function Sidebar({ profile }: Props) {
               "flex items-center gap-3 px-3 py-2 rounded text-sm transition-colors",
               pathname === href
                 ? "bg-accent text-foreground"
-                : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
             )}
           >
             <Icon size={15} />
@@ -61,7 +78,20 @@ export default function Sidebar({ profile }: Props) {
             Trial: {trialDaysLeft}d left
           </p>
         )}
-        <p className="text-xs text-muted-foreground truncate">{profile?.email}</p>
+        {!profile?.is_admin && (
+          <Link
+            href="/billing"
+            className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <CreditCard size={13} />
+            {["active", "trialing"].includes(profile?.stripe_status || "")
+              ? "Manage billing"
+              : "Upgrade"}
+          </Link>
+        )}
+        <p className="text-xs text-muted-foreground truncate">
+          {profile?.email}
+        </p>
         <button
           onClick={signOut}
           className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
