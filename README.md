@@ -1,5 +1,7 @@
 # AI Episodic Pivot
 
+**Live:** [https://episodic-pivots-ai.vercel.app](https://episodic-pivots-ai.vercel.app)
+
 ## Overview
 
 End-to-end intelligent AI system for analyzing pre-market stock movers, built around a multi-agent LLM pipeline and a full-stack web application.
