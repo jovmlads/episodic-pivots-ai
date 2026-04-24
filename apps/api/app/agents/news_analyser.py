@@ -5,6 +5,7 @@ Falls back to web search if no news URL is provided.
 Logic mirrors catalyst_analyzer.py from episodic-pivots-ai.
 """
 from __future__ import annotations
+import asyncio
 import json
 import logging
 import re
@@ -17,7 +18,8 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+# max_retries=0: we handle retries ourselves with proper backoff
+client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key, max_retries=0)
 
 POSITIVE_CATALYSTS = [
     "earnings_beat", "guidance_raise", "contract_win", "partnership",
@@ -85,13 +87,24 @@ async def analyse_ticker(
     company_name: str,
     premarket_change_pct: float,
     news_url: str | None,
+    news_title: str | None = None,
 ) -> AnalysisResult:
     """Main entry point. Returns structured analysis for one ticker."""
     news_content = None
     web_search_used = False
 
-    if news_url:
+    if news_title:
+        # Headline from scraper is reliable even when article body is paywalled/JS-only.
+        # Try to fetch full article for more detail; fall back to headline alone.
+        news_content = f"News headline: {news_title}"
+        if news_url:
+            full_text = await _fetch_url(news_url)
+            if full_text:
+                news_content = full_text
+    elif news_url:
         news_content = await _fetch_url(news_url)
+        if not news_content:
+            news_content = f"Article URL: {news_url}"
 
     if not news_content:
         news_content, web_search_used = await _web_search_fallback(ticker, company_name)
@@ -101,6 +114,7 @@ async def analyse_ticker(
         company_name=company_name,
         premarket_change_pct=premarket_change_pct,
         news_url=news_url,
+        news_title=news_title,
         news_content=news_content,
         web_search_used=web_search_used,
     )
@@ -116,7 +130,7 @@ async def _fetch_url(url: str) -> str | None:
             # Strip HTML tags naively — good enough for news articles
             text = re.sub(r"<[^>]+>", " ", text)
             text = re.sub(r"\s+", " ", text).strip()
-            return text[:8000]  # cap context
+            return text[:3000]  # cap context
     except Exception as exc:
         logger.warning("Failed to fetch %s: %s", url, exc)
         return None
@@ -125,19 +139,20 @@ async def _fetch_url(url: str) -> str | None:
 async def _web_search_fallback(ticker: str, company_name: str) -> tuple[str, bool]:
     """Use Claude's web_search tool to find why ticker is gapping."""
     try:
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1024,
-            tools=[{"type": "web_search_20250305", "name": "web_search"}],
-            messages=[{
-                "role": "user",
-                "content": (
-                    f"Search for why {ticker} ({company_name}) stock is moving significantly "
-                    f"in pre-market today. Look for news, earnings, FDA decisions, commodity moves, "
-                    f"geopolitical events, or any catalyst. Return the key findings."
-                ),
-            }],
-        )
+        async with asyncio.timeout(25):
+            response = await client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=512,
+                tools=[{"type": "web_search_20250305", "name": "web_search"}],
+                messages=[{
+                    "role": "user",
+                    "content": (
+                        f"Search for why {ticker} ({company_name}) stock is moving significantly "
+                        f"in pre-market today. Look for news, earnings, FDA decisions, commodity moves, "
+                        f"geopolitical events, or any catalyst. Return the key findings."
+                    ),
+                }],
+            )
         result_text = _extract_text(response)
         return result_text, True
     except Exception as exc:
@@ -150,6 +165,7 @@ async def _call_claude(
     company_name: str,
     premarket_change_pct: float,
     news_url: str | None,
+    news_title: str | None,
     news_content: str | None,
     web_search_used: bool,
 ) -> AnalysisResult:
@@ -157,50 +173,63 @@ async def _call_claude(
     prompt = (
         f"Stock: {ticker} ({company_name})\n"
         f"Pre-market move: {premarket_change_pct:+.1f}% ({direction})\n"
+        f"News headline: {news_title or 'N/A'}\n"
         f"News URL: {news_url or 'N/A'}\n\n"
         f"News/Context:\n{news_content or 'No news available.'}\n\n"
         f"Analyse this catalyst and return JSON matching the schema."
     )
 
-    try:
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=512,
-            system=SYSTEM_PROMPT,
-            tools=[{
-                "name": "report_analysis",
-                "description": "Report the catalyst analysis result",
-                "input_schema": ANALYSIS_SCHEMA,
-            }],
-            tool_choice={"type": "tool", "name": "report_analysis"},
-            messages=[{"role": "user", "content": prompt}],
-        )
+    for attempt in range(2):
+        try:
+            async with asyncio.timeout(30):
+                response = await client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=512,
+                    system=SYSTEM_PROMPT,
+                    tools=[{
+                        "name": "report_analysis",
+                        "description": "Report the catalyst analysis result",
+                        "input_schema": ANALYSIS_SCHEMA,
+                    }],
+                    tool_choice={"type": "tool", "name": "report_analysis"},
+                    messages=[{"role": "user", "content": prompt}],
+                )
+            data = _extract_tool_input(response)
+            return AnalysisResult(
+                catalyst_type=data.get("catalyst_type", "none"),
+                sentiment=data.get("sentiment", "neutral"),
+                trading_signal=data.get("trading_signal", "skip"),
+                analysis_text=data.get("analysis_text", "Unable to determine catalyst."),
+                news_title=data.get("news_title"),
+                news_url=news_url,
+                web_search_used=web_search_used,
+                tokens_input=response.usage.input_tokens,
+                tokens_output=response.usage.output_tokens,
+            )
+        except anthropic.RateLimitError:
+            wait = 5 * (2 ** attempt)  # 5s, 10s
+            logger.warning("Rate limited on %s, retrying in %ds (attempt %d/2)", ticker, wait, attempt + 1)
+            await asyncio.sleep(wait)
+        except Exception as exc:
+            logger.exception("Claude analysis failed for %s", ticker)
+            return AnalysisResult(
+                catalyst_type="none",
+                sentiment="neutral",
+                trading_signal="skip",
+                analysis_text=f"Analysis failed: {exc}",
+                news_title=None,
+                news_url=news_url,
+                web_search_used=web_search_used,
+                tokens_input=0,
+                tokens_output=0,
+            )
 
-        data = _extract_tool_input(response)
-        return AnalysisResult(
-            catalyst_type=data.get("catalyst_type", "none"),
-            sentiment=data.get("sentiment", "neutral"),
-            trading_signal=data.get("trading_signal", "skip"),
-            analysis_text=data.get("analysis_text", "Unable to determine catalyst."),
-            news_title=data.get("news_title"),
-            news_url=news_url,
-            web_search_used=web_search_used,
-            tokens_input=response.usage.input_tokens,
-            tokens_output=response.usage.output_tokens,
-        )
-    except Exception as exc:
-        logger.exception("Claude analysis failed for %s", ticker)
-        return AnalysisResult(
-            catalyst_type="none",
-            sentiment="neutral",
-            trading_signal="skip",
-            analysis_text=f"Analysis failed: {exc}",
-            news_title=None,
-            news_url=news_url,
-            web_search_used=web_search_used,
-            tokens_input=0,
-            tokens_output=0,
-        )
+    return AnalysisResult(
+        catalyst_type="none", sentiment="neutral", trading_signal="skip",
+        analysis_text="Rate limited. Please retry the scan shortly.",
+        news_title=None, news_url=news_url, web_search_used=web_search_used,
+        tokens_input=0, tokens_output=0,
+    )
 
 
 def _extract_tool_input(response) -> dict:

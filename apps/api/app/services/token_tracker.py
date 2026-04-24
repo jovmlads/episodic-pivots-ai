@@ -16,28 +16,36 @@ def get_usage(user_id: str) -> dict:
     """Return token usage for the current month."""
     month = current_month_year()
     db = get_supabase()
-    row = (
-        db.table("token_usage")
-        .select("tokens_total")
-        .eq("user_id", user_id)
-        .eq("month_year", month)
-        .maybe_single()
-        .execute()
-    )
-    return row.data or {"tokens_total": 0}
+    try:
+        row = (
+            db.table("token_usage")
+            .select("tokens_total")
+            .eq("user_id", user_id)
+            .eq("month_year", month)
+            .maybe_single()
+            .execute()
+        )
+        return (row.data if row and row.data else None) or {"tokens_total": 0}
+    except Exception:
+        return {"tokens_total": 0}
 
 
 def get_budget(user_id: str) -> int:
     """Return the user's monthly token budget."""
     db = get_supabase()
-    row = (
-        db.table("profiles")
-        .select("monthly_token_budget")
-        .eq("id", user_id)
-        .single()
-        .execute()
-    )
-    return row.data.get("monthly_token_budget", settings.default_monthly_token_budget)
+    try:
+        row = (
+            db.table("profiles")
+            .select("monthly_token_budget")
+            .eq("id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        if row and row.data:
+            return row.data.get("monthly_token_budget", settings.default_monthly_token_budget)
+    except Exception:
+        pass
+    return settings.default_monthly_token_budget
 
 
 def check_budget(user_id: str) -> tuple[bool, int, int]:

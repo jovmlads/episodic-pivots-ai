@@ -1,8 +1,9 @@
 "use client";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus, Trash2, Send, Loader2 } from "lucide-react";
-import type { ScreenerConfig } from "@/types";
+import { Plus, Trash2, Send, Loader2, Play, ChevronDown, ChevronRight } from "lucide-react";
+import ResultsTable, { type ResultRow } from "@/components/dashboard/results-table";
+import type { ScreenerConfig, ScanSSEEvent } from "@/types";
 
 interface Props {
   userId: string;
@@ -20,6 +21,10 @@ const MARKETS = ["america", "canada", "uk", "germany", "australia", "india"];
 export default function ScreenerSettings({ userId, initialConfigs }: Props) {
   const [configs, setConfigs] = useState<ScreenerConfig[]>(initialConfigs);
   const [activeTab, setActiveTab] = useState<"menu" | "ai">("menu");
+  const [runningId, setRunningId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [configResults, setConfigResults] = useState<Record<string, ResultRow[]>>({});
 
   // Menu form state
   const [form, setForm] = useState({
@@ -130,10 +135,100 @@ export default function ScreenerSettings({ userId, initialConfigs }: Props) {
     toast.success("Config saved from AI suggestion");
   }
 
+  async function runConfig(id: string) {
+    setRunningId(id);
+    const collected: ScanSSEEvent[] = [];
+    try {
+      const res = await fetch("/api/scans/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ config_id: id }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || "Scan failed");
+      }
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const raw = line.slice(6).trim();
+          if (raw === "[DONE]") break;
+          try {
+            const event: ScanSSEEvent = JSON.parse(raw);
+            collected.push(event);
+            if (event.type === "ticker" && event.ticker) {
+              setConfigResults(prev => {
+                const existing = prev[id] || [];
+                if (existing.find(r => r.ticker === event.ticker)) return prev;
+                return { ...prev, [id]: [...existing, { ticker: event.ticker!, pct: event.premarket_change_pct ?? 0, analysing: true }] };
+              });
+              setExpandedId(id);
+            }
+            if (event.type === "result" && event.ticker) {
+              setConfigResults(prev => ({
+                ...prev,
+                [id]: (prev[id] || []).map(r => r.ticker !== event.ticker ? r : {
+                  ticker: event.ticker!,
+                  pct: event.premarket_change_pct ?? r.pct,
+                  signal: event.trading_signal,
+                  catalyst: event.catalyst_type,
+                  analysis: event.analysis_text,
+                  newsUrl: event.news_url,
+                  webSearch: event.web_search_used,
+                  analysing: false,
+                }),
+              }));
+            }
+            if (event.type === "error" && event.ticker) {
+              setConfigResults(prev => ({
+                ...prev,
+                [id]: (prev[id] || []).map(r => r.ticker !== event.ticker ? r : {
+                  ...r, analysis: event.message || "Analysis failed", analysing: false,
+                }),
+              }));
+            }
+            if (event.type === "complete") toast.success(`Scan complete — ${event.total_results} result(s)`);
+            if (event.type === "no_results") toast.info(event.message || "No results found");
+          } catch {}
+        }
+      }
+      const rowMap = new Map<string, ResultRow>();
+      for (const e of collected) {
+        if (e.type === "ticker" && e.ticker) {
+          rowMap.set(e.ticker, { ticker: e.ticker, pct: e.premarket_change_pct ?? 0, analysing: true });
+        } else if (e.type === "result" && e.ticker) {
+          rowMap.set(e.ticker, {
+            ticker: e.ticker, pct: e.premarket_change_pct ?? 0,
+            signal: e.trading_signal, catalyst: e.catalyst_type,
+            analysis: e.analysis_text, newsUrl: e.news_url, webSearch: e.web_search_used,
+            analysing: false,
+          });
+        }
+      }
+      if (rowMap.size > 0) {
+        setConfigResults(prev => ({ ...prev, [id]: Array.from(rowMap.values()) }));
+        setExpandedId(id);
+      }
+    } catch (err: unknown) {
+      toast.error((err as Error).message || "Scan error");
+    } finally {
+      setRunningId(null);
+    }
+  }
+
   async function deleteConfig(id: string) {
     await fetch(`/api/proxy/configs/${id}`, { method: "DELETE", headers: { "X-User-Id": userId } });
     setConfigs(prev => prev.filter(c => c.id !== id));
-    toast.success("Config deleted");
+    setConfirmDeleteId(null);
+    toast.success("Screener deleted");
   }
 
   return (
@@ -274,19 +369,73 @@ export default function ScreenerSettings({ userId, initialConfigs }: Props) {
       {/* Existing configs */}
       {configs.length > 0 && (
         <div>
-          <h2 className="text-sm font-medium text-muted-foreground mb-2">Saved Configs</h2>
+          <h2 className="text-sm font-medium text-muted-foreground mb-2">Screeners</h2>
           <div className="space-y-2">
             {configs.map(c => (
-              <div key={c.id} className="flex items-center justify-between border border-border rounded px-4 py-2">
-                <div>
-                  <p className="text-sm font-medium">{c.name}</p>
-                  <p className="text-xs text-muted-foreground">{c.scan_type} · {c.market} · {c.result_limit} results{c.schedule_cron ? ` · ${c.schedule_cron}` : ""}</p>
+              <div key={c.id} className="border border-border rounded overflow-hidden">
+                <div
+                  className="flex items-center justify-between px-4 py-2 cursor-pointer hover:bg-secondary/40 transition-colors"
+                  onClick={() => setExpandedId(expandedId === c.id ? null : c.id)}
+                >
+                  <div className="flex items-center gap-2">
+                    {expandedId === c.id
+                      ? <ChevronDown size={14} className="text-muted-foreground shrink-0" />
+                      : <ChevronRight size={14} className="text-muted-foreground shrink-0" />}
+                    <div>
+                      <p className="text-sm font-medium">{c.name}</p>
+                      <p className="text-xs text-muted-foreground">{c.scan_type} · {c.market} · {c.result_limit} results{c.schedule_cron ? ` · ${c.schedule_cron}` : ""}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                    <button
+                      onClick={() => runConfig(c.id)}
+                      disabled={runningId !== null}
+                      className="flex items-center gap-1 text-xs bg-primary text-primary-foreground px-2.5 py-1 rounded hover:opacity-90 disabled:opacity-50 transition-opacity"
+                    >
+                      {runningId === c.id ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+                      {runningId === c.id ? "Running..." : "Run"}
+                    </button>
+                    <button onClick={() => setConfirmDeleteId(c.id)} className="text-muted-foreground hover:text-destructive transition-colors">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
-                <button onClick={() => deleteConfig(c.id)} className="text-muted-foreground hover:text-destructive transition-colors">
-                  <Trash2 size={14} />
-                </button>
+                {expandedId === c.id && (
+                  <div className="border-t border-border bg-secondary/10">
+                    {configResults[c.id]
+                      ? <ResultsTable rows={configResults[c.id]} />
+                      : <p className="text-sm text-muted-foreground px-4 py-3">Run this screener to see results.</p>
+                    }
+                  </div>
+                )}
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirmation modal */}
+      {confirmDeleteId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="bg-background border border-border rounded-lg p-6 w-full max-w-sm shadow-xl">
+            <h3 className="text-sm font-semibold mb-1">Delete screener?</h3>
+            <p className="text-sm text-muted-foreground mb-5">
+              This screener will be permanently deleted and cannot be recovered.
+            </p>
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setConfirmDeleteId(null)}
+                className="px-4 py-2 text-sm rounded border border-border hover:bg-secondary transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => deleteConfig(confirmDeleteId)}
+                className="px-4 py-2 text-sm rounded bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity"
+              >
+                Delete
+              </button>
+            </div>
           </div>
         </div>
       )}

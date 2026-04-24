@@ -1,14 +1,54 @@
 "use client";
 import { useState, useRef } from "react";
 import { toast } from "sonner";
-import { Play, Loader2 } from "lucide-react";
-import { formatPct, formatVolume, signalColor, cn } from "@/lib/utils";
-import type { ScanRun, ScanSSEEvent, ScreenerConfig } from "@/types";
+import { Play, Loader2, ChevronDown, ChevronRight } from "lucide-react";
+import { formatPct, signalColor, cn } from "@/lib/utils";
+import ResultsTable, { type ResultRow } from "./results-table";
+import type { ScanRun, ScanSSEEvent, ScanResult, ScreenerConfig } from "@/types";
 
 interface Props {
   userId: string;
   initialRuns: ScanRun[];
   configs: Pick<ScreenerConfig, "id" | "name" | "scan_type" | "is_active">[];
+}
+
+function eventsToRowMap(events: ScanSSEEvent[]): Map<string, ResultRow> {
+  const map = new Map<string, ResultRow>();
+  for (const e of events) {
+    if (e.type === "ticker" && e.ticker) {
+      map.set(e.ticker, { ticker: e.ticker, pct: e.premarket_change_pct ?? 0, analysing: true });
+    } else if (e.type === "result" && e.ticker) {
+      map.set(e.ticker, {
+        ticker: e.ticker, pct: e.premarket_change_pct ?? 0,
+        signal: e.trading_signal, catalyst: e.catalyst_type,
+        analysis: e.analysis_text, newsUrl: e.news_url, webSearch: e.web_search_used,
+        analysing: false,
+      });
+    } else if (e.type === "error" && e.ticker) {
+      const existing = map.get(e.ticker);
+      map.set(e.ticker, {
+        ticker: e.ticker, pct: existing?.pct ?? 0,
+        analysis: e.message || "Analysis failed",
+        analysing: false,
+      });
+    }
+  }
+  return map;
+}
+
+function storedResultsToRows(results: ScanResult[]): ResultRow[] {
+  return results.map(r => {
+    const a = r.ai_analyses?.[0];
+    return {
+      ticker: r.ticker,
+      pct: r.premarket_change_pct,
+      signal: a?.trading_signal,
+      catalyst: a?.catalyst_type,
+      analysis: a?.analysis_text,
+      newsUrl: a?.news_url,
+      webSearch: a?.web_search_used,
+    };
+  });
 }
 
 export default function ScanDashboard({ userId, initialRuns, configs }: Props) {
@@ -17,6 +57,10 @@ export default function ScanDashboard({ userId, initialRuns, configs }: Props) {
   const [events, setEvents] = useState<ScanSSEEvent[]>([]);
   const [runs] = useState<ScanRun[]>(initialRuns);
   const abortRef = useRef<AbortController | null>(null);
+
+  const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
+  const [runResults, setRunResults] = useState<Record<string, ResultRow[]>>({});
+  const [loadingRunId, setLoadingRunId] = useState<string | null>(null);
 
   async function triggerScan() {
     if (!selectedConfig) return toast.error("Select a screener config first");
@@ -69,7 +113,29 @@ export default function ScanDashboard({ userId, initialRuns, configs }: Props) {
     }
   }
 
-  const results = events.filter(e => e.type === "result");
+  async function toggleRun(runId: string) {
+    if (expandedRunId === runId) {
+      setExpandedRunId(null);
+      return;
+    }
+    setExpandedRunId(runId);
+    if (runResults[runId]) return;
+
+    setLoadingRunId(runId);
+    try {
+      const res = await fetch(`/api/proxy/scans/${runId}`);
+      if (!res.ok) throw new Error("Failed to load results");
+      const data = await res.json();
+      setRunResults(prev => ({ ...prev, [runId]: storedResultsToRows(data.results || []) }));
+    } catch {
+      toast.error("Could not load scan results");
+    } finally {
+      setLoadingRunId(null);
+    }
+  }
+
+  const rowMap = eventsToRowMap(events);
+  const liveResults = Array.from(rowMap.values());
   const startEvent = events.find(e => e.type === "start");
   const completeEvent = events.find(e => e.type === "complete");
   const noResults = events.find(e => e.type === "no_results");
@@ -100,12 +166,20 @@ export default function ScanDashboard({ userId, initialRuns, configs }: Props) {
         </div>
       </div>
 
+      {/* Empty state */}
+      {runs.length === 0 && events.length === 0 && !scanning && (
+        <div className="flex flex-col items-center justify-center py-24 text-center">
+          <p className="text-muted-foreground">No screeners have been run yet.</p>
+          <p className="text-sm text-muted-foreground/60 mt-1">Select a screener from the dropdown above and click Run Scan to get started.</p>
+        </div>
+      )}
+
       {/* Live scan results */}
       {(events.length > 0 || scanning) && (
         <div className="border border-border rounded-lg overflow-hidden">
           <div className="px-4 py-2 bg-secondary border-b border-border flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground">
-              {scanning ? "Scanning..." : `Scan complete`}
+              {scanning ? "Scanning..." : "Scan complete"}
               {startEvent && ` — ${startEvent.total} ticker(s)`}
             </span>
             {completeEvent && (
@@ -114,59 +188,12 @@ export default function ScanDashboard({ userId, initialRuns, configs }: Props) {
               </span>
             )}
           </div>
-
           {noResults && (
             <div className="px-4 py-6 text-center text-muted-foreground text-sm">
               {noResults.message}
             </div>
           )}
-
-          {results.length > 0 && (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-muted-foreground text-xs">
-                  <th className="px-4 py-2 text-left">Ticker</th>
-                  <th className="px-4 py-2 text-right">PM Chg</th>
-                  <th className="px-4 py-2 text-left">Signal</th>
-                  <th className="px-4 py-2 text-left">Catalyst</th>
-                  <th className="px-4 py-2 text-left">Analysis</th>
-                  <th className="px-4 py-2 text-left">News</th>
-                </tr>
-              </thead>
-              <tbody>
-                {results.map((r, i) => (
-                  <tr key={i} className="border-b border-border/50 hover:bg-accent/30 transition-colors">
-                    <td className="px-4 py-2 font-bold">{r.ticker}</td>
-                    <td className={cn(
-                      "px-4 py-2 text-right font-mono",
-                      (r.premarket_change_pct ?? 0) >= 0 ? "text-bullish" : "text-bearish"
-                    )}>
-                      {formatPct(r.premarket_change_pct ?? 0)}
-                    </td>
-                    <td className={cn("px-4 py-2 uppercase text-xs font-bold", signalColor(r.trading_signal as never))}>
-                      {r.trading_signal?.replace("_", " ")}
-                    </td>
-                    <td className="px-4 py-2 text-xs text-muted-foreground capitalize">
-                      {r.catalyst_type?.replace(/_/g, " ") || "—"}
-                    </td>
-                    <td className="px-4 py-2 text-xs max-w-xs">{r.analysis_text}</td>
-                    <td className="px-4 py-2">
-                      {r.news_url && (
-                        <a
-                          href={r.news_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs text-muted-foreground underline hover:text-foreground"
-                        >
-                          {r.web_search_used ? "web" : "news"}
-                        </a>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+          {liveResults.length > 0 && <ResultsTable rows={liveResults} />}
         </div>
       )}
 
@@ -179,6 +206,7 @@ export default function ScanDashboard({ userId, initialRuns, configs }: Props) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-muted-foreground text-xs">
+                <th className="px-4 py-2 text-left w-6"></th>
                 <th className="px-4 py-2 text-left">Config</th>
                 <th className="px-4 py-2 text-left">Status</th>
                 <th className="px-4 py-2 text-right">Results</th>
@@ -188,24 +216,49 @@ export default function ScanDashboard({ userId, initialRuns, configs }: Props) {
             </thead>
             <tbody>
               {runs.map(run => (
-                <tr key={run.id} className="border-b border-border/50 hover:bg-accent/30">
-                  <td className="px-4 py-2">{(run as never as {screener_configs?: {name:string}}).screener_configs?.name || "—"}</td>
-                  <td className="px-4 py-2">
-                    <span className={cn(
-                      "text-xs px-2 py-0.5 rounded",
-                      run.status === "completed" ? "bg-green-900/30 text-green-400" :
-                      run.status === "failed" ? "bg-red-900/30 text-red-400" :
-                      "bg-secondary text-muted-foreground"
-                    )}>
-                      {run.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-2 text-right">{run.result_count}</td>
-                  <td className="px-4 py-2 text-xs text-muted-foreground capitalize">{run.triggered_by}</td>
-                  <td className="px-4 py-2 text-xs text-muted-foreground">
-                    {new Date(run.created_at).toLocaleString()}
-                  </td>
-                </tr>
+                <>
+                  <tr
+                    key={run.id}
+                    onClick={() => run.status === "completed" && toggleRun(run.id)}
+                    className={cn(
+                      "border-b border-border/50 hover:bg-accent/30",
+                      run.status === "completed" && "cursor-pointer"
+                    )}
+                  >
+                    <td className="px-4 py-2 text-muted-foreground">
+                      {run.status === "completed" && (
+                        loadingRunId === run.id
+                          ? <Loader2 size={12} className="animate-spin" />
+                          : expandedRunId === run.id
+                            ? <ChevronDown size={12} />
+                            : <ChevronRight size={12} />
+                      )}
+                    </td>
+                    <td className="px-4 py-2">{(run as never as {screener_configs?: {name:string}}).screener_configs?.name || "—"}</td>
+                    <td className="px-4 py-2">
+                      <span className={cn(
+                        "text-xs px-2 py-0.5 rounded",
+                        run.status === "completed" ? "bg-green-900/30 text-green-400" :
+                        run.status === "failed" ? "bg-red-900/30 text-red-400" :
+                        "bg-secondary text-muted-foreground"
+                      )}>
+                        {run.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 text-right">{run.result_count}</td>
+                    <td className="px-4 py-2 text-xs text-muted-foreground capitalize">{run.triggered_by}</td>
+                    <td className="px-4 py-2 text-xs text-muted-foreground">
+                      {new Date(run.created_at).toLocaleString()}
+                    </td>
+                  </tr>
+                  {expandedRunId === run.id && (
+                    <tr key={`${run.id}-expanded`} className="border-b border-border/50 bg-secondary/20">
+                      <td colSpan={6} className="p-0">
+                        <ResultsTable rows={runResults[run.id] || []} />
+                      </td>
+                    </tr>
+                  )}
+                </>
               ))}
             </tbody>
           </table>

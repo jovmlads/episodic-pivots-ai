@@ -79,7 +79,7 @@ export interface AIAnalysis {
 }
 
 export interface ScanSSEEvent {
-  type: "start" | "result" | "no_results" | "complete" | "error";
+  type: "start" | "ticker" | "result" | "no_results" | "complete" | "error";
   total?: number;
   run_id?: string;
   ticker?: string;
