@@ -1,8 +1,18 @@
 "use client";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Plus, Trash2, Send, Loader2, Play, ChevronDown, ChevronRight } from "lucide-react";
-import ResultsTable, { type ResultRow } from "@/components/dashboard/results-table";
+import {
+  Plus,
+  Trash2,
+  Send,
+  Loader2,
+  Play,
+  ChevronDown,
+  ChevronRight,
+} from "lucide-react";
+import ResultsTable, {
+  type ResultRow,
+} from "@/components/dashboard/results-table";
 import type { ScreenerConfig, ScanSSEEvent } from "@/types";
 
 interface Props {
@@ -24,7 +34,9 @@ export default function ScreenerSettings({ userId, initialConfigs }: Props) {
   const [runningId, setRunningId] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [configResults, setConfigResults] = useState<Record<string, ResultRow[]>>({});
+  const [configResults, setConfigResults] = useState<
+    Record<string, ResultRow[]>
+  >({});
 
   // Menu form state
   const [form, setForm] = useState({
@@ -42,17 +54,38 @@ export default function ScreenerSettings({ userId, initialConfigs }: Props) {
 
   // AI chat state
   const [chatInput, setChatInput] = useState("");
-  const [chatMessages, setChatMessages] = useState<{role: "user" | "ai"; text: string}[]>([]);
-  const [pendingConfig, setPendingConfig] = useState<Partial<ScreenerConfig> | null>(null);
+  const [chatMessages, setChatMessages] = useState<
+    { role: "user" | "ai"; text: string }[]
+  >([]);
+  const [pendingConfig, setPendingConfig] =
+    useState<Partial<ScreenerConfig> | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
 
   async function handleMenuSave() {
     const filters = [
       { left: "type", operation: "equal", right: "stock" },
-      { left: "premarket_change", operation: scan_type_is_negative() ? "less" : "greater", right: scan_type_is_negative() ? -form.min_pm_change : form.min_pm_change },
-      { left: "close", operation: "in_range", right: [form.min_price, form.max_price] },
-      { left: "relative_volume", operation: "greater", right: form.min_rel_volume },
-      { left: "float_shares_outstanding", operation: "less", right: form.max_float_m * 1_000_000 },
+      {
+        left: "premarket_change",
+        operation: scan_type_is_negative() ? "less" : "greater",
+        right: scan_type_is_negative()
+          ? -form.min_pm_change
+          : form.min_pm_change,
+      },
+      {
+        left: "close",
+        operation: "in_range",
+        right: [form.min_price, form.max_price],
+      },
+      {
+        left: "relative_volume",
+        operation: "greater",
+        right: form.min_rel_volume,
+      },
+      {
+        left: "float_shares_outstanding",
+        operation: "less",
+        right: form.max_float_m * 1_000_000,
+      },
     ];
     const body = {
       name: form.name || `${form.scan_type} ${form.market}`,
@@ -70,21 +103,26 @@ export default function ScreenerSettings({ userId, initialConfigs }: Props) {
       headers: { "Content-Type": "application/json", "X-User-Id": userId },
       body: JSON.stringify(body),
     });
-    if (!res.ok) { toast.error("Failed to save config"); return; }
+    if (!res.ok) {
+      toast.error("Failed to save config");
+      return;
+    }
     const newConfig = await res.json();
-    setConfigs(prev => [newConfig, ...prev]);
+    setConfigs((prev) => [newConfig, ...prev]);
     toast.success("Config saved");
   }
 
   function scan_type_is_negative() {
-    return form.scan_type === "premarket_losers" || form.scan_type === "gap_down";
+    return (
+      form.scan_type === "premarket_losers" || form.scan_type === "gap_down"
+    );
   }
 
   async function handleAiSubmit() {
     if (!chatInput.trim()) return;
     const userMsg = chatInput;
     setChatInput("");
-    setChatMessages(prev => [...prev, { role: "user", text: userMsg }]);
+    setChatMessages((prev) => [...prev, { role: "user", text: userMsg }]);
     setAiLoading(true);
     setPendingConfig(null);
     let aiText = "";
@@ -108,8 +146,12 @@ export default function ScreenerSettings({ userId, initialConfigs }: Props) {
           const raw = line.slice(6).trim();
           if (raw === "[DONE]") break;
           const evt = JSON.parse(raw);
-          if (evt.type === "chunk") aiText += evt.text;
+          if (evt.type === "error")
+            aiText = `Error: ${evt.message || "Unknown error"}`;
           if (evt.type === "final") {
+            aiText =
+              evt.message ||
+              (evt.success ? "Config ready." : "Could not build config.");
             if (evt.success && evt.config) setPendingConfig(evt.config);
           }
         }
@@ -117,7 +159,7 @@ export default function ScreenerSettings({ userId, initialConfigs }: Props) {
     } catch {
       aiText = "Error generating config. Please try again.";
     }
-    setChatMessages(prev => [...prev, { role: "ai", text: aiText }]);
+    setChatMessages((prev) => [...prev, { role: "ai", text: aiText }]);
     setAiLoading(false);
   }
 
@@ -128,9 +170,12 @@ export default function ScreenerSettings({ userId, initialConfigs }: Props) {
       headers: { "Content-Type": "application/json", "X-User-Id": userId },
       body: JSON.stringify(pendingConfig),
     });
-    if (!res.ok) { toast.error("Failed to save config"); return; }
+    if (!res.ok) {
+      toast.error("Failed to save config");
+      return;
+    }
     const newConfig = await res.json();
-    setConfigs(prev => [newConfig, ...prev]);
+    setConfigs((prev) => [newConfig, ...prev]);
     setPendingConfig(null);
     toast.success("Config saved from AI suggestion");
   }
@@ -165,56 +210,92 @@ export default function ScreenerSettings({ userId, initialConfigs }: Props) {
             const event: ScanSSEEvent = JSON.parse(raw);
             collected.push(event);
             if (event.type === "ticker" && event.ticker) {
-              setConfigResults(prev => {
+              setConfigResults((prev) => {
                 const existing = prev[id] || [];
-                if (existing.find(r => r.ticker === event.ticker)) return prev;
-                return { ...prev, [id]: [...existing, { ticker: event.ticker!, pct: event.premarket_change_pct ?? 0, analysing: true }] };
+                if (existing.find((r) => r.ticker === event.ticker))
+                  return prev;
+                return {
+                  ...prev,
+                  [id]: [
+                    ...existing,
+                    {
+                      ticker: event.ticker!,
+                      pct: event.premarket_change_pct ?? 0,
+                      analysing: true,
+                    },
+                  ],
+                };
               });
               setExpandedId(id);
             }
             if (event.type === "result" && event.ticker) {
-              setConfigResults(prev => ({
+              setConfigResults((prev) => ({
                 ...prev,
-                [id]: (prev[id] || []).map(r => r.ticker !== event.ticker ? r : {
-                  ticker: event.ticker!,
-                  pct: event.premarket_change_pct ?? r.pct,
-                  signal: event.trading_signal,
-                  catalyst: event.catalyst_type,
-                  analysis: event.analysis_text,
-                  newsUrl: event.news_url,
-                  webSearch: event.web_search_used,
-                  analysing: false,
-                }),
+                [id]: (prev[id] || []).map((r) =>
+                  r.ticker !== event.ticker
+                    ? r
+                    : {
+                        ticker: event.ticker!,
+                        pct: event.premarket_change_pct ?? r.pct,
+                        signal: event.trading_signal,
+                        catalyst: event.catalyst_type,
+                        analysis: event.analysis_text,
+                        newsUrl: event.news_url,
+                        webSearch: event.web_search_used,
+                        analysing: false,
+                        resultId: event.result_id,
+                      },
+                ),
               }));
             }
             if (event.type === "error" && event.ticker) {
-              setConfigResults(prev => ({
+              setConfigResults((prev) => ({
                 ...prev,
-                [id]: (prev[id] || []).map(r => r.ticker !== event.ticker ? r : {
-                  ...r, analysis: event.message || "Analysis failed", analysing: false,
-                }),
+                [id]: (prev[id] || []).map((r) =>
+                  r.ticker !== event.ticker
+                    ? r
+                    : {
+                        ...r,
+                        analysis: event.message || "Analysis failed",
+                        analysing: false,
+                      },
+                ),
               }));
             }
-            if (event.type === "complete") toast.success(`Scan complete — ${event.total_results} result(s)`);
-            if (event.type === "no_results") toast.info(event.message || "No results found");
+            if (event.type === "complete")
+              toast.success(`Scan complete — ${event.total_results} result(s)`);
+            if (event.type === "no_results")
+              toast.info(event.message || "No results found");
           } catch {}
         }
       }
       const rowMap = new Map<string, ResultRow>();
       for (const e of collected) {
         if (e.type === "ticker" && e.ticker) {
-          rowMap.set(e.ticker, { ticker: e.ticker, pct: e.premarket_change_pct ?? 0, analysing: true });
+          rowMap.set(e.ticker, {
+            ticker: e.ticker,
+            pct: e.premarket_change_pct ?? 0,
+            analysing: true,
+          });
         } else if (e.type === "result" && e.ticker) {
           rowMap.set(e.ticker, {
-            ticker: e.ticker, pct: e.premarket_change_pct ?? 0,
-            signal: e.trading_signal, catalyst: e.catalyst_type,
-            analysis: e.analysis_text, newsUrl: e.news_url, webSearch: e.web_search_used,
+            ticker: e.ticker,
+            pct: e.premarket_change_pct ?? 0,
+            signal: e.trading_signal,
+            catalyst: e.catalyst_type,
+            analysis: e.analysis_text,
+            newsUrl: e.news_url,
+            webSearch: e.web_search_used,
             analysing: false,
+            resultId: e.result_id,
           });
         }
       }
       if (rowMap.size > 0) {
-        setConfigResults(prev => ({ ...prev, [id]: Array.from(rowMap.values()) }));
+        setConfigResults((prev) => ({
+          ...prev,
+          [id]: Array.from(rowMap.values()),
+        }));
         setExpandedId(id);
       }
     } catch (err: unknown) {
@@ -225,8 +306,11 @@ export default function ScreenerSettings({ userId, initialConfigs }: Props) {
   }
 
   async function deleteConfig(id: string) {
-    await fetch(`/api/proxy/configs/${id}`, { method: "DELETE", headers: { "X-User-Id": userId } });
-    setConfigs(prev => prev.filter(c => c.id !== id));
+    await fetch(`/api/proxy/configs/${id}`, {
+      method: "DELETE",
+      headers: { "X-User-Id": userId },
+    });
+    setConfigs((prev) => prev.filter((c) => c.id !== id));
     setConfirmDeleteId(null);
     toast.success("Screener deleted");
   }
@@ -235,7 +319,7 @@ export default function ScreenerSettings({ userId, initialConfigs }: Props) {
     <div className="space-y-6">
       {/* Tabs */}
       <div className="flex gap-1 border-b border-border">
-        {(["menu", "ai"] as const).map(tab => (
+        {(["menu", "ai"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -245,7 +329,7 @@ export default function ScreenerSettings({ userId, initialConfigs }: Props) {
                 : "border-transparent text-muted-foreground hover:text-foreground"
             }`}
           >
-            {tab === "menu" ? "Menu Builder" : "AI Assistant"}
+            {tab === "menu" ? "Manual Builder" : "AI Assistant Builder"}
           </button>
         ))}
       </div>
@@ -257,7 +341,7 @@ export default function ScreenerSettings({ userId, initialConfigs }: Props) {
             <label className="text-xs text-muted-foreground">Name</label>
             <input
               value={form.name}
-              onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
               placeholder="My screener"
               className="w-full bg-secondary border border-border rounded px-3 py-2 text-sm"
             />
@@ -266,56 +350,130 @@ export default function ScreenerSettings({ userId, initialConfigs }: Props) {
             <label className="text-xs text-muted-foreground">Scan Type</label>
             <select
               value={form.scan_type}
-              onChange={e => setForm(f => ({ ...f, scan_type: e.target.value }))}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, scan_type: e.target.value }))
+              }
               className="w-full bg-secondary border border-border rounded px-3 py-2 text-sm"
             >
-              {SCAN_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+              {SCAN_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
             </select>
           </div>
           <div className="space-y-1">
             <label className="text-xs text-muted-foreground">Market</label>
             <select
               value={form.market}
-              onChange={e => setForm(f => ({ ...f, market: e.target.value }))}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, market: e.target.value }))
+              }
               className="w-full bg-secondary border border-border rounded px-3 py-2 text-sm capitalize"
             >
-              {MARKETS.map(m => <option key={m} value={m}>{m}</option>)}
+              {MARKETS.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
             </select>
           </div>
           <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">Min PM Change (%)</label>
+            <label className="text-xs text-muted-foreground">
+              Min PM Change (%)
+            </label>
             <input
               type="number"
               value={form.min_pm_change}
-              onChange={e => setForm(f => ({ ...f, min_pm_change: +e.target.value }))}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, min_pm_change: +e.target.value }))
+              }
               className="w-full bg-secondary border border-border rounded px-3 py-2 text-sm"
             />
           </div>
           <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">Price Range ($)</label>
+            <label className="text-xs text-muted-foreground">
+              Price Range ($)
+            </label>
             <div className="flex gap-2">
-              <input type="number" value={form.min_price} onChange={e => setForm(f => ({ ...f, min_price: +e.target.value }))} className="w-full bg-secondary border border-border rounded px-3 py-2 text-sm" placeholder="Min" />
-              <input type="number" value={form.max_price} onChange={e => setForm(f => ({ ...f, max_price: +e.target.value }))} className="w-full bg-secondary border border-border rounded px-3 py-2 text-sm" placeholder="Max" />
+              <input
+                type="number"
+                value={form.min_price}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, min_price: +e.target.value }))
+                }
+                className="w-full bg-secondary border border-border rounded px-3 py-2 text-sm"
+                placeholder="Min"
+              />
+              <input
+                type="number"
+                value={form.max_price}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, max_price: +e.target.value }))
+                }
+                className="w-full bg-secondary border border-border rounded px-3 py-2 text-sm"
+                placeholder="Max"
+              />
             </div>
           </div>
           <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">Max Float (M shares)</label>
-            <input type="number" value={form.max_float_m} onChange={e => setForm(f => ({ ...f, max_float_m: +e.target.value }))} className="w-full bg-secondary border border-border rounded px-3 py-2 text-sm" />
+            <label className="text-xs text-muted-foreground">
+              Max Float (M shares)
+            </label>
+            <input
+              type="number"
+              value={form.max_float_m}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, max_float_m: +e.target.value }))
+              }
+              className="w-full bg-secondary border border-border rounded px-3 py-2 text-sm"
+            />
           </div>
           <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">Min Relative Volume</label>
-            <input type="number" step="0.5" value={form.min_rel_volume} onChange={e => setForm(f => ({ ...f, min_rel_volume: +e.target.value }))} className="w-full bg-secondary border border-border rounded px-3 py-2 text-sm" />
+            <label className="text-xs text-muted-foreground">
+              Min Relative Volume
+            </label>
+            <input
+              type="number"
+              step="0.5"
+              value={form.min_rel_volume}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, min_rel_volume: +e.target.value }))
+              }
+              className="w-full bg-secondary border border-border rounded px-3 py-2 text-sm"
+            />
           </div>
           <div className="space-y-1">
             <label className="text-xs text-muted-foreground">Max Results</label>
-            <input type="number" min={1} max={50} value={form.result_limit} onChange={e => setForm(f => ({ ...f, result_limit: +e.target.value }))} className="w-full bg-secondary border border-border rounded px-3 py-2 text-sm" />
+            <input
+              type="number"
+              min={1}
+              max={50}
+              value={form.result_limit}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, result_limit: +e.target.value }))
+              }
+              className="w-full bg-secondary border border-border rounded px-3 py-2 text-sm"
+            />
           </div>
           <div className="col-span-2 space-y-1">
-            <label className="text-xs text-muted-foreground">Schedule (cron, optional — e.g. <code>30 9 * * 1-5</code>)</label>
-            <input value={form.schedule_cron} onChange={e => setForm(f => ({ ...f, schedule_cron: e.target.value }))} placeholder="Leave blank for manual only" className="w-full bg-secondary border border-border rounded px-3 py-2 text-sm" />
+            <label className="text-xs text-muted-foreground">
+              Schedule (cron, optional — e.g. <code>30 9 * * 1-5</code>)
+            </label>
+            <input
+              value={form.schedule_cron}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, schedule_cron: e.target.value }))
+              }
+              placeholder="Leave blank for manual only"
+              className="w-full bg-secondary border border-border rounded px-3 py-2 text-sm"
+            />
           </div>
           <div className="col-span-2">
-            <button onClick={handleMenuSave} className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded text-sm font-medium hover:opacity-90">
+            <button
+              onClick={handleMenuSave}
+              className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded text-sm font-medium hover:opacity-90"
+            >
               <Plus size={14} /> Save Config
             </button>
           </div>
@@ -328,21 +486,37 @@ export default function ScreenerSettings({ userId, initialConfigs }: Props) {
           <div className="border border-border rounded-lg min-h-48 max-h-96 overflow-y-auto p-4 space-y-3 bg-secondary/20">
             {chatMessages.length === 0 && (
               <p className="text-muted-foreground text-sm">
-                Describe your screening criteria in plain English. Example: "scan pre-market gainers over 5% with float under 20M and price between $2-$20 on Nasdaq"
+                Describe your screening criteria in plain English. Example:
+                "scan pre-market gainers over 5% with float under 20M and price
+                between $2-$20 on Nasdaq"
               </p>
             )}
             {chatMessages.map((m, i) => (
-              <div key={i} className={`text-sm ${m.role === "user" ? "text-foreground" : "text-muted-foreground"}`}>
-                <span className="font-bold mr-2">{m.role === "user" ? "You:" : "AI:"}</span>
+              <div
+                key={i}
+                className={`text-sm ${m.role === "user" ? "text-foreground" : "text-muted-foreground"}`}
+              >
+                <span className="font-bold mr-2">
+                  {m.role === "user" ? "You:" : "AI:"}
+                </span>
                 <span className="whitespace-pre-wrap">{m.text}</span>
               </div>
             ))}
-            {aiLoading && <p className="text-muted-foreground text-sm animate-pulse">Analysing criteria...</p>}
+            {aiLoading && (
+              <p className="text-muted-foreground text-sm animate-pulse">
+                Analysing criteria...
+              </p>
+            )}
           </div>
           {pendingConfig && (
             <div className="border border-green-700/50 bg-green-900/10 rounded p-3 flex items-center justify-between">
-              <p className="text-sm text-green-400">Config ready: <strong>{pendingConfig.name}</strong></p>
-              <button onClick={saveAiConfig} className="text-sm bg-green-700 text-white px-3 py-1 rounded hover:bg-green-600">
+              <p className="text-sm text-green-400">
+                Config ready: <strong>{pendingConfig.name}</strong>
+              </p>
+              <button
+                onClick={saveAiConfig}
+                className="text-sm bg-green-700 text-white px-3 py-1 rounded hover:bg-green-600"
+              >
                 Save Config
               </button>
             </div>
@@ -350,8 +524,10 @@ export default function ScreenerSettings({ userId, initialConfigs }: Props) {
           <div className="flex gap-2">
             <input
               value={chatInput}
-              onChange={e => setChatInput(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && !e.shiftKey && handleAiSubmit()}
+              onChange={(e) => setChatInput(e.target.value.slice(0, 500))}
+              onKeyDown={(e) =>
+                e.key === "Enter" && !e.shiftKey && handleAiSubmit()
+              }
               placeholder="Describe your screening criteria..."
               className="flex-1 bg-secondary border border-border rounded px-3 py-2 text-sm"
             />
@@ -360,52 +536,92 @@ export default function ScreenerSettings({ userId, initialConfigs }: Props) {
               disabled={aiLoading || !chatInput.trim()}
               className="flex items-center gap-1 bg-primary text-primary-foreground px-3 py-2 rounded text-sm disabled:opacity-50"
             >
-              {aiLoading ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+              {aiLoading ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Send size={14} />
+              )}
             </button>
           </div>
+          {chatInput.length > 400 && (
+            <p className="text-xs text-muted-foreground text-right">
+              {chatInput.length}/500
+            </p>
+          )}
         </div>
       )}
 
       {/* Existing configs */}
       {configs.length > 0 && (
         <div>
-          <h2 className="text-sm font-medium text-muted-foreground mb-2">Screeners</h2>
+          <h2 className="text-sm font-medium text-muted-foreground mb-2">
+            Screeners
+          </h2>
           <div className="space-y-2">
-            {configs.map(c => (
-              <div key={c.id} className="border border-border rounded overflow-hidden">
+            {configs.map((c) => (
+              <div
+                key={c.id}
+                className="border border-border rounded overflow-hidden"
+              >
                 <div
                   className="flex items-center justify-between px-4 py-2 cursor-pointer hover:bg-secondary/40 transition-colors"
-                  onClick={() => setExpandedId(expandedId === c.id ? null : c.id)}
+                  onClick={() =>
+                    setExpandedId(expandedId === c.id ? null : c.id)
+                  }
                 >
                   <div className="flex items-center gap-2">
-                    {expandedId === c.id
-                      ? <ChevronDown size={14} className="text-muted-foreground shrink-0" />
-                      : <ChevronRight size={14} className="text-muted-foreground shrink-0" />}
+                    {expandedId === c.id ? (
+                      <ChevronDown
+                        size={14}
+                        className="text-muted-foreground shrink-0"
+                      />
+                    ) : (
+                      <ChevronRight
+                        size={14}
+                        className="text-muted-foreground shrink-0"
+                      />
+                    )}
                     <div>
                       <p className="text-sm font-medium">{c.name}</p>
-                      <p className="text-xs text-muted-foreground">{c.scan_type} · {c.market} · {c.result_limit} results{c.schedule_cron ? ` · ${c.schedule_cron}` : ""}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {c.scan_type} · {c.market} · {c.result_limit} results
+                        {c.schedule_cron ? ` · ${c.schedule_cron}` : ""}
+                      </p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                  <div
+                    className="flex items-center gap-2"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <button
                       onClick={() => runConfig(c.id)}
                       disabled={runningId !== null}
                       className="flex items-center gap-1 text-xs bg-primary text-primary-foreground px-2.5 py-1 rounded hover:opacity-90 disabled:opacity-50 transition-opacity"
                     >
-                      {runningId === c.id ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+                      {runningId === c.id ? (
+                        <Loader2 size={12} className="animate-spin" />
+                      ) : (
+                        <Play size={12} />
+                      )}
                       {runningId === c.id ? "Running..." : "Run"}
                     </button>
-                    <button onClick={() => setConfirmDeleteId(c.id)} className="text-muted-foreground hover:text-destructive transition-colors">
+                    <button
+                      onClick={() => setConfirmDeleteId(c.id)}
+                      className="text-muted-foreground hover:text-destructive transition-colors"
+                    >
                       <Trash2 size={14} />
                     </button>
                   </div>
                 </div>
                 {expandedId === c.id && (
                   <div className="border-t border-border bg-secondary/10">
-                    {configResults[c.id]
-                      ? <ResultsTable rows={configResults[c.id]} />
-                      : <p className="text-sm text-muted-foreground px-4 py-3">Run this screener to see results.</p>
-                    }
+                    {configResults[c.id] ? (
+                      <ResultsTable rows={configResults[c.id]} />
+                    ) : (
+                      <p className="text-sm text-muted-foreground px-4 py-3">
+                        Run this screener to see results.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>

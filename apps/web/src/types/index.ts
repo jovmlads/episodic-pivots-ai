@@ -70,7 +70,14 @@ export interface AIAnalysis {
   news_title: string | null;
   catalyst_type: string | null;
   sentiment: "bullish" | "bearish" | "neutral" | null;
-  trading_signal: "strong_buy" | "buy" | "watch" | "skip" | "short" | "strong_short" | null;
+  trading_signal:
+    | "strong_buy"
+    | "buy"
+    | "watch"
+    | "skip"
+    | "short"
+    | "strong_short"
+    | null;
   analysis_text: string;
   web_search_used: boolean;
   tokens_input: number;
@@ -82,6 +89,7 @@ export interface ScanSSEEvent {
   type: "start" | "ticker" | "result" | "no_results" | "complete" | "error";
   total?: number;
   run_id?: string;
+  result_id?: string;
   ticker?: string;
   company_name?: string;
   premarket_change_pct?: number;
@@ -104,4 +112,10 @@ export interface TokenUsage {
   month_year: string;
 }
 
-export type TradingSignal = "strong_buy" | "buy" | "watch" | "skip" | "short" | "strong_short";
+export type TradingSignal =
+  | "strong_buy"
+  | "buy"
+  | "watch"
+  | "skip"
+  | "short"
+  | "strong_short";

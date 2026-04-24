@@ -22,10 +22,10 @@ def get_usage(user_id: str) -> dict:
             .select("tokens_total")
             .eq("user_id", user_id)
             .eq("month_year", month)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
-        return (row.data if row and row.data else None) or {"tokens_total": 0}
+        return row.data[0] if row and row.data else {"tokens_total": 0}
     except Exception:
         return {"tokens_total": 0}
 
@@ -38,11 +38,11 @@ def get_budget(user_id: str) -> int:
             db.table("profiles")
             .select("monthly_token_budget")
             .eq("id", user_id)
-            .maybe_single()
+            .limit(1)
             .execute()
         )
         if row and row.data:
-            return row.data.get("monthly_token_budget", settings.default_monthly_token_budget)
+            return row.data[0].get("monthly_token_budget", settings.default_monthly_token_budget)
     except Exception:
         pass
     return settings.default_monthly_token_budget
@@ -68,16 +68,17 @@ def record_usage(user_id: str, tokens_input: int, tokens_output: int) -> None:
         .select("id, tokens_input, tokens_output, tokens_total")
         .eq("user_id", user_id)
         .eq("month_year", month)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
     if existing.data:
+        existing_data = existing.data[0]
         db.table("token_usage").update({
-            "tokens_input": existing.data["tokens_input"] + tokens_input,
-            "tokens_output": existing.data["tokens_output"] + tokens_output,
-            "tokens_total": existing.data["tokens_total"] + total,
+            "tokens_input": existing_data["tokens_input"] + tokens_input,
+            "tokens_output": existing_data["tokens_output"] + tokens_output,
+            "tokens_total": existing_data["tokens_total"] + total,
             "updated_at": datetime.now().isoformat(),
-        }).eq("id", existing.data["id"]).execute()
+        }).eq("id", existing_data["id"]).execute()
     else:
         db.table("token_usage").insert({
             "user_id": user_id,

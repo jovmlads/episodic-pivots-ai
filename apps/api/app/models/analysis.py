@@ -1,6 +1,6 @@
 from __future__ import annotations
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class AIAnalysis(BaseModel):
@@ -31,6 +31,19 @@ class SimilarResult(BaseModel):
 
 class NLScreenerRequest(BaseModel):
     user_input: str
+
+    @field_validator("user_input")
+    @classmethod
+    def validate_user_input(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("user_input must not be empty")
+        if len(v) > 500:
+            raise ValueError("user_input must be 500 characters or fewer")
+        # Strip control characters (except normal whitespace)
+        import re
+        v = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", v)
+        return v
 
 
 class NLScreenerResponse(BaseModel):

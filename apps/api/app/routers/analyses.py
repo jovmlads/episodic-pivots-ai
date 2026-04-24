@@ -7,6 +7,8 @@ POST /analyses/screener-nl — NL screener config producer (SSE stream)
 from __future__ import annotations
 import json
 import logging
+import time
+from collections import defaultdict
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -16,6 +18,20 @@ from app.models.analysis import NLScreenerRequest
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# In-memory sliding window rate limiter: 10 requests per user per 60s
+_rate_store: dict[str, list[float]] = defaultdict(list)
+_RATE_WINDOW = 60
+_RATE_MAX = 10
+
+
+def _check_rate_limit(user_id: str) -> None:
+    now = time.monotonic()
+    cutoff = now - _RATE_WINDOW
+    _rate_store[user_id] = [t for t in _rate_store[user_id] if t > cutoff]
+    if len(_rate_store[user_id]) >= _RATE_MAX:
+        raise HTTPException(429, f"Rate limit exceeded — max {_RATE_MAX} AI requests per minute")
+    _rate_store[user_id].append(now)
 
 
 def _require_user(x_user_id: str | None) -> str:
@@ -61,7 +77,8 @@ async def screener_nl(
     x_user_id: str | None = Header(default=None),
 ):
     """Stream NL → screener config conversion."""
-    _require_user(x_user_id)
+    user_id = _require_user(x_user_id)
+    _check_rate_limit(user_id)
     from app.agents.screener_config_producer import produce_config_stream
 
     async def event_stream():

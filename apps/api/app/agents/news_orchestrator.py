@@ -97,6 +97,7 @@ async def run_orchestrator(
 
                 yield {
                     "type": "result",
+                    "result_id": result_id,
                     "ticker": candidate.ticker,
                     "company_name": candidate.company_name,
                     "premarket_change_pct": candidate.premarket_change_pct,
@@ -108,10 +109,11 @@ async def run_orchestrator(
                     "analysis_text": analysis.analysis_text,
                     "web_search_used": analysis.web_search_used,
                 }
+                signal_label = analysis.trading_signal.replace("_", " ").title() if analysis.trading_signal else ""
                 report_lines.append(
                     f"<tr><td>{candidate.ticker}</td><td>{candidate.company_name}</td>"
                     f"<td>{candidate.premarket_change_pct:+.1f}%</td>"
-                    f"<td>{analysis.trading_signal}</td>"
+                    f"<td>{signal_label}</td>"
                     f"<td>{analysis.analysis_text}</td></tr>"
                 )
 
@@ -134,7 +136,7 @@ async def run_orchestrator(
             "total_tokens": total_input + total_output,
         }
 
-        _post_scan_notifications(user_id, report_lines, run_id)
+        _post_scan_notifications(user_id, report_lines, run_id, config.name)
 
     except Exception as exc:
         logger.exception("Orchestrator failed for run %s", run_id)
@@ -231,22 +233,26 @@ def _update_run(db, run_id: str, **kwargs) -> None:
     db.table("scan_runs").update(kwargs).eq("id", run_id).execute()
 
 
-def _post_scan_notifications(user_id: str, report_lines: list[str], run_id: str) -> None:
+def _post_scan_notifications(user_id: str, report_lines: list[str], run_id: str, screener_name: str = "") -> None:
     try:
         db = get_supabase()
         notif = (
             db.table("notification_settings")
             .select("email, notify_on_scan_complete, notify_on_budget_warning")
-            .eq("user_id", user_id).maybe_single().execute()
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
         )
         if not notif.data:
             return
-        s = notif.data
+        s = notif.data[0]
         if s.get("notify_on_scan_complete") and report_lines:
+            header = f"<h2 style='font-family:sans-serif'>Screener: {screener_name}</h2>" if screener_name else ""
             table_html = (
-                "<table border='1' cellpadding='6' style='border-collapse:collapse'>"
-                "<tr><th>Ticker</th><th>Company</th><th>PM Change</th>"
-                "<th>Signal</th><th>Analysis</th></tr>"
+                header
+                + "<table border='1' cellpadding='6' style='border-collapse:collapse;font-family:sans-serif'>"
+                + "<tr><th>Ticker</th><th>Company</th><th>PM Change</th>"
+                + "<th>Signal</th><th>Analysis</th></tr>"
                 + "".join(report_lines) + "</table>"
             )
             send_scan_report(s["email"], table_html, datetime.now().strftime("%Y-%m-%d"))

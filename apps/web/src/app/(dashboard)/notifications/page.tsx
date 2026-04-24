@@ -3,13 +3,25 @@ import NotificationSettings from "@/components/settings/notification-settings";
 
 export default async function NotificationsPage() {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   const { data: settings } = await supabase
     .from("notification_settings")
     .select("*")
     .eq("user_id", user!.id)
     .maybeSingle();
+
+  // Seed defaults for users who registered before this was added
+  if (!settings) {
+    await supabase.from("notification_settings").insert({
+      user_id: user!.id,
+      email: user!.email,
+      notify_on_scan_complete: true,
+      notify_on_budget_warning: true,
+    });
+  }
 
   const { data: usage } = await supabase
     .from("token_usage")

@@ -28,7 +28,7 @@ async def upsert_notification_settings(
         db.table("notification_settings")
         .select("id")
         .eq("user_id", user_id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
     data = {
@@ -38,7 +38,7 @@ async def upsert_notification_settings(
         "notify_on_budget_warning": body.notify_on_budget_warning,
     }
     if existing.data:
-        db.table("notification_settings").update(data).eq("id", existing.data["id"]).execute()
+        db.table("notification_settings").update(data).eq("id", existing.data[0]["id"]).execute()
     else:
         db.table("notification_settings").insert(data).execute()
     return {"ok": True}
@@ -52,10 +52,10 @@ async def get_notification_settings(x_user_id: str | None = Header(default=None)
         db.table("notification_settings")
         .select("*")
         .eq("user_id", user_id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
-    return row.data or {}
+    return row.data[0] if row.data else {}
 
 
 @router.get("/token-usage")

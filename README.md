@@ -228,7 +228,30 @@ select avg(web_search_used::int) as fallback_rate from ai_analyses;
 
 ---
 
-### 3. Database (`supabase/migrations/`)
+### 2b. AI Assistant Builder (`screener_config_producer.py`)
+
+**What it does:** Accepts a plain-English description from the user and converts it into a validated `ScreenerConfig` JSON using Claude, streamed back as SSE.
+
+#### Security
+
+| Measure                     | Detail                                                                                                                                              |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Authentication              | Supabase session validated by Next.js proxy before the request reaches FastAPI. `X-User-Id` is set server-side only — the browser never controls it |
+| Input length limit          | `user_input` capped at 500 characters, enforced by Pydantic validator on the API and sliced at the frontend                                         |
+| Control character stripping | Pydantic validator strips `\x00`–`\x1f` control characters from user input before it reaches the model                                              |
+| Prompt structure            | User input is sent as the **user turn**, strictly separated from the system prompt — it cannot override or escape system instructions               |
+| Output validation           | Only the `config` JSON object from Claude's response is ever parsed and persisted. Raw model output is never forwarded to the client or stored      |
+| Rate limiting               | Per-user sliding window: 10 requests per 60 seconds, enforced in-process. Exceeding the limit returns HTTP 429                                      |
+
+#### Prompt caching
+
+The system prompt (field reference + instructions, ~1000 tokens) is marked with `cache_control: ephemeral` and sent with the `anthropic-beta: prompt-caching-2024-07-31` header. Anthropic caches the prompt for 5 minutes after first use.
+
+- **Cost impact:** cached input tokens billed at ~10% of normal rate
+- **Latency impact:** cache hits skip tokenising the system prompt, reducing time-to-first-token
+- Cache is keyed per model version — invalidated automatically on model changes
+
+---
 
 **Schema:** `profiles`, `screener_configs`, `scan_runs`, `scan_results`, `ai_analyses`, `token_usage`, `notification_settings`
 

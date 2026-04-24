@@ -13,7 +13,7 @@ import anthropic
 from app.config import settings
 
 logger = logging.getLogger(__name__)
-client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key, max_retries=0)
 
 # Embedded field reference extracted from tradingview-scraper + TradingView API
 SCREENER_FIELD_REFERENCE = """
@@ -116,13 +116,20 @@ async def produce_config_stream(user_input: str) -> AsyncGenerator[dict, None]:
     """Stream the NL → config conversion."""
     full_text = ""
     try:
-        with client.messages.stream(
-            model="claude-sonnet-4-6",
+        async with client.messages.stream(
+            model="claude-haiku-4-5-20251001",
             max_tokens=1024,
-            system=SYSTEM_PROMPT,
+            system=[
+                {
+                    "type": "text",
+                    "text": SYSTEM_PROMPT,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
             messages=[{"role": "user", "content": user_input}],
+            extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"},
         ) as stream:
-            for text in stream.text_stream:
+            async for text in stream.text_stream:
                 full_text += text
                 yield {"type": "chunk", "text": text}
 
