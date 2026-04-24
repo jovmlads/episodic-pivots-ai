@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import ChartModal from "./chart-modal";
 
 type SimilarRow = {
   ticker: string;
@@ -20,6 +21,7 @@ interface Props {
 export default function SimilarModal({ resultId, ticker, onClose }: Props) {
   const [rows, setRows] = useState<SimilarRow[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const [chartTicker, setChartTicker] = useState<string | null>(null);
 
   useEffect(() => {
     fetch(`/api/proxy/analyses/similar?result_id=${resultId}&limit=5`)
@@ -75,6 +77,12 @@ export default function SimilarModal({ resultId, ticker, onClose }: Props) {
                       {new Date(r.scanned_at).toLocaleDateString()}
                     </span>
                   )}
+                  <button
+                    onClick={() => setChartTicker(r.ticker)}
+                    className="text-xs text-muted-foreground underline hover:text-foreground"
+                  >
+                    Chart
+                  </button>
                   {r.news_url && (
                     <a
                       href={r.news_url}
@@ -94,6 +102,9 @@ export default function SimilarModal({ resultId, ticker, onClose }: Props) {
           </div>
         )}
       </div>
+      {chartTicker && (
+        <ChartModal ticker={chartTicker} onClose={() => setChartTicker(null)} />
+      )}
     </div>
   );
 }

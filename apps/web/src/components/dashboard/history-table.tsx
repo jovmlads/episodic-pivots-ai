@@ -3,6 +3,7 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 import type { ScanRun } from "@/types";
 import SimilarModal from "./similar-modal";
+import ChartModal from "./chart-modal";
 
 interface Props {
   runs: ScanRun[];
@@ -151,6 +152,7 @@ function ResultRow({
   analysis?: AnalysisRow;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
+  const [chartOpen, setChartOpen] = useState(false);
 
   return (
     <div className="space-y-1">
@@ -184,6 +186,12 @@ function ResultRow({
             )}
           </>
         )}
+        <button
+          onClick={() => setChartOpen(true)}
+          className="shrink-0 text-xs text-muted-foreground underline hover:text-foreground"
+        >
+          Chart
+        </button>
         {analysis && (
           <button
             onClick={() => setModalOpen(true)}
@@ -193,6 +201,12 @@ function ResultRow({
           </button>
         )}
       </div>
+      {chartOpen && (
+        <ChartModal
+          ticker={result.ticker}
+          onClose={() => setChartOpen(false)}
+        />
+      )}
       {modalOpen && (
         <SimilarModal
           resultId={result.id}

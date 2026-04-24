@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { formatPct, signalColor, cn } from "@/lib/utils";
 import SimilarModal from "./similar-modal";
+import ChartModal from "./chart-modal";
 
 export interface ResultRow {
   ticker: string;
@@ -21,6 +22,7 @@ export default function ResultsTable({ rows }: { rows: ResultRow[] }) {
     resultId: string;
     ticker: string;
   } | null>(null);
+  const [chartTicker, setChartTicker] = useState<string | null>(null);
 
   if (!rows.length)
     return (
@@ -39,6 +41,7 @@ export default function ResultsTable({ rows }: { rows: ResultRow[] }) {
             <th className="px-4 py-2 text-left">Catalyst</th>
             <th className="px-4 py-2 text-left">Analysis</th>
             <th className="px-4 py-2 text-left">News</th>
+            <th className="px-4 py-2 text-left">Chart</th>
             <th className="px-4 py-2 text-left">Similar</th>
           </tr>
         </thead>
@@ -90,6 +93,16 @@ export default function ResultsTable({ rows }: { rows: ResultRow[] }) {
                 )}
               </td>
               <td className="px-4 py-2">
+                {!r.analysing && (
+                  <button
+                    onClick={() => setChartTicker(r.ticker)}
+                    className="text-xs text-muted-foreground underline hover:text-foreground"
+                  >
+                    Chart
+                  </button>
+                )}
+              </td>
+              <td className="px-4 py-2">
                 {r.resultId && !r.analysing && r.signal && (
                   <button
                     onClick={() =>
@@ -105,6 +118,9 @@ export default function ResultsTable({ rows }: { rows: ResultRow[] }) {
           ))}
         </tbody>
       </table>
+      {chartTicker && (
+        <ChartModal ticker={chartTicker} onClose={() => setChartTicker(null)} />
+      )}
       {modal && (
         <SimilarModal
           resultId={modal.resultId}
