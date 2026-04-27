@@ -742,6 +742,15 @@ HTML report is written to `apps/web/playwright-report-prod/`. JSON results at `a
 
 Enterprise-grade performance, metrics, evals, and security assessment for all four AI agents. Measurements derived from code instrumentation and production API characteristics.
 
+### Model selection
+
+| Model | Used for | Why |
+|---|---|---|
+| `claude-haiku-4-5-20251001` | news_analyser · screener_config_producer | Lowest latency in the Claude family (critical in a 30-minute pre-market window). Forced tool use closes the accuracy gap vs larger models by constraining output to a strict schema — haiku cannot hallucinate outside the enum. ~10× cheaper than Sonnet at the volume this pipeline runs (20+ tickers × multiple scans/day). |
+| `text-embedding-3-small` (OpenAI) | rag_similarity | Cheapest high-quality embedding at $0.02/1M tokens. 1536 dims is sufficient for semantic similarity across financial news; no benefit from 3072-dim models for this retrieval task. |
+
+Sonnet / Opus are not used for inference-path agents — the latency and cost penalty is unjustified when the output schema is fully specified via tool use. Larger models would be considered if free-text reasoning (e.g. multi-step analysis reports) were added to the pipeline.
+
 ---
 
 ### Agent 1 — `news_analyser.py` (Catalyst Classifier)
