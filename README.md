@@ -38,15 +38,59 @@ Episodic Pivot automates the full pipeline: screen TradingView for gap/pre-marke
 
 ## Architecture & Rationale
 
-```
-Browser
-  └─ Next.js on Vercel                  — UI, Supabase auth, SSE proxy to FastAPI
-       └─ FastAPI on Railway (Docker)   — scraping, AI orchestration, scheduling
-            ├─ tradingview-scraper      — TradingView screener + news
-            ├─ Anthropic SDK            — 4 AI agents
-            ├─ APScheduler             — user-defined cron schedules
-            └─ Resend                   — transactional email
-  └─ Supabase                           — Postgres + pgvector + Auth + RLS
+```mermaid
+graph TB
+    subgraph Browser["Browser"]
+        UI["Next.js App Router\nLogin · Dashboard · History\nSettings · Billing"]
+    end
+
+    subgraph Vercel["Vercel — Next.js 15"]
+        MW["Middleware\nAuth gate + trial check"]
+        BFF["API Routes (BFF)\nSSE proxy · Stripe webhook\nNotification settings"]
+    end
+
+    subgraph Railway["Railway — FastAPI (Docker)"]
+        ORCH["news_orchestrator.py\nFan-out · SSE stream · persist · email"]
+        ANALYSER["news_analyser.py\nCatalyst classification per ticker"]
+        SCRAPER["TradingView screener\nPre-market movers + news URLs"]
+        SCHED["APScheduler\nUser-defined cron jobs"]
+        RAG["rag_similarity.py\nEmbedding + similarity search"]
+        PRODUCER["screener_config_producer.py\nNL → screener config"]
+    end
+
+    subgraph Supabase["Supabase"]
+        AUTH["Auth / JWT"]
+        DB[("Postgres 15\nRLS on all tables")]
+        VEC["pgvector\nIVFFlat index\n(embeddings)"]
+    end
+
+    subgraph External["External APIs"]
+        TV["TradingView"]
+        CLAUDE["Anthropic Claude\nclaude-sonnet-4-6"]
+        OAI["OpenAI\ntext-embedding-3-small"]
+        STRIPE["Stripe\nCheckout · Webhooks"]
+        RESEND["Resend\nTransactional email"]
+    end
+
+    UI -->|"HTTPS + Supabase cookie"| MW
+    MW -->|"validate JWT"| AUTH
+    MW --> BFF
+    BFF -->|"POST X-User-Id (server-side only)"| ORCH
+    BFF --> STRIPE
+    SCHED -->|"cron trigger"| ORCH
+    ORCH --> SCRAPER
+    SCRAPER --> TV
+    ORCH -->|"asyncio.gather"| ANALYSER
+    ANALYSER --> CLAUDE
+    ANALYSER -->|"persist"| DB
+    ORCH --> RAG
+    RAG --> OAI
+    RAG --> VEC
+    ORCH --> RESEND
+    BFF --> DB
+    UI -->|"PRODUCER stream"| BFF
+    BFF --> PRODUCER
+    PRODUCER --> CLAUDE
 ```
 
 **Why this split:**
@@ -55,18 +99,60 @@ Browser
 - Next.js handles auth UI and proxies SSE server-side so the browser never holds API credentials
 - Supabase is one platform for auth, data, vectors, and RLS — no separate identity provider or vector DB
 
-### Data flow
+### Data flow — scan pipeline
 
+```mermaid
+sequenceDiagram
+    actor User
+    participant Next.js
+    participant FastAPI
+    participant TradingView
+    participant Claude
+    participant Supabase
+    participant Resend
+
+    User->>Next.js: Click "Run Scan"
+    Next.js->>Next.js: Validate Supabase session (middleware)
+    Next.js->>FastAPI: POST /scans/trigger {config_id} + X-User-Id
+    FastAPI->>Supabase: Load screener config (filters, thresholds)
+    FastAPI->>TradingView: Run screener with user filters
+    TradingView-->>FastAPI: Ticker list [AAPL, TSLA, ...]
+    FastAPI-->>Next.js: SSE {type:"start", total:N}
+    Next.js-->>User: "Scanning — N tickers"
+
+    FastAPI->>TradingView: Fetch news URLs (parallel, per ticker)
+
+    par asyncio.gather — one coroutine per ticker
+        FastAPI->>Claude: Analyse news article (tool use)
+        Claude-->>FastAPI: {catalyst_type, trading_signal, analysis_text}
+        FastAPI-->>Next.js: SSE {type:"result", ticker, signal, analysis}
+        Next.js-->>User: Live result row appears
+        FastAPI->>Supabase: INSERT scan_result + ai_analysis
+        FastAPI-)Supabase: Background: generate embedding → pgvector
+    end
+
+    FastAPI-->>Next.js: SSE {type:"complete", total_results, total_tokens}
+    FastAPI->>Resend: Send scan report email
+    Next.js-->>User: "Scan complete — N result(s)"
 ```
-User trigger / APScheduler cron
-  → FastAPI: run TradingView screener (user config from DB)
-  → For each result: fetch news URL from TradingView
-  → asyncio.gather: spawn parallel AI news analyser per ticker
-  → SSE stream: start → result (per ticker) → complete
-  → Persist: scan_results + ai_analyses to Supabase
-  → Background: generate embeddings → store in pgvector
-  → Email: send scan report via Resend
-  → On query: pgvector cosine similarity → similar past setups
+
+### RAG similarity flow
+
+```mermaid
+sequenceDiagram
+    actor User
+    participant Next.js
+    participant FastAPI
+    participant OpenAI
+    participant pgvector
+
+    User->>Next.js: Click "Find Similar" on a result
+    Next.js->>FastAPI: GET /analyses/similar?result_id=X
+    FastAPI->>Supabase: Fetch stored embedding for result X
+    FastAPI->>pgvector: match_analyses() RPC — cosine similarity search
+    pgvector-->>FastAPI: Top-K similar past analyses
+    FastAPI-->>Next.js: Similar setups with scores
+    Next.js-->>User: Similar historical results panel
 ```
 
 ---
@@ -448,49 +534,43 @@ Events to enable: `checkout.session.completed`, `customer.subscription.*`
 
 ### Deployment gate — tests must pass before Vercel deploys
 
-`.github/workflows/deploy.yml` runs on every push to `main` and every PR:
-
+```mermaid
+flowchart LR
+    A["git push main\nor PR opened"] --> B["GitHub Actions\ndeploy.yml"]
+    B --> C["Job 1 — Playwright E2E\n159 tests\nChromium + Firefox\nLive production URL"]
+    C -- "All 159 pass" --> D["Job 2 — Deploy\nvercel --prod\n(main branch only)"]
+    C -- "Any test fails" --> E["Workflow fails\n🚫 No deploy"]
+    D --> F["episodic-pivots-ai\n.vercel.app"]
 ```
-push to main / PR opened
-  └─ Job 1: Playwright E2E (159 tests, Chromium + Firefox, prod URL)
-       ├─ PASS → Job 2: vercel --prod  (main branch only)
-       └─ FAIL → workflow fails, Vercel never receives the deploy
-```
 
-**Vercel auto-deploy from GitHub must be disabled** for this gate to be effective — see setup below.
+`.github/workflows/deploy.yml` — what it does:
 
-#### One-time setup
+1. Installs deps and Playwright browsers (Chromium + Firefox)
+2. Runs `npm run test:prod` — all 159 tests against the live production URL
+3. Uploads the HTML test report as a workflow artifact (kept 14 days)
+4. **Only if tests pass and branch is `main`**: runs `vercel --prod` via CLI token
 
-**1. Disable Vercel auto-deploy**
+Vercel's GitHub integration is **disconnected** — production deploys only happen through this workflow.
 
-In the [Vercel dashboard](https://vercel.com) → Project → Settings → Git → set **Production Branch** to a branch that doesn't exist (e.g. `deploy-via-ci`), or disconnect the GitHub integration entirely. Deployments will now only happen when the workflow calls `vercel --prod`.
+#### Current status
 
-**2. Add GitHub repository secrets**
-
-`Settings → Secrets and variables → Actions → New repository secret`:
-
-| Secret | Where to find it |
+| Component | State |
 |---|---|
-| `VERCEL_TOKEN` | vercel.com → Account Settings → Tokens |
-| `VERCEL_ORG_ID` | `.vercel/project.json` → `orgId` (run `vercel link` locally first) |
-| `VERCEL_PROJECT_ID` | `.vercel/project.json` → `projectId` |
+| Vercel GitHub auto-deploy | ✅ Disconnected |
+| GitHub Actions workflow | ✅ Active — `.github/workflows/deploy.yml` |
+| `VERCEL_TOKEN` secret | ✅ Set (repo-level) |
+| `VERCEL_ORG_ID` secret | ✅ Set (repo-level) |
+| `VERCEL_PROJECT_ID` secret | ✅ Set (repo-level) |
+| Branch protection on `main` | ⬜ Optional — add to block direct pushes |
 
-**3. Enable branch protection on `main`**
+#### Optional: lock down `main` with branch protection
 
 `GitHub repo → Settings → Branches → Add rule`:
 - Branch name pattern: `main`
-- ✅ Require status checks to pass before merging
-- ✅ Add status check: `Playwright E2E (production)`
-- ✅ Require branches to be up to date before merging
+- ✅ Require status checks to pass before merging → add `Playwright E2E (production)`
 - ✅ Do not allow bypassing the above settings
 
-After this, direct pushes to `main` are blocked and any PR that fails E2E cannot be merged.
-
-#### Required secrets summary
-
-```
-VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID
-```
+This prevents merging any PR that fails E2E and blocks direct pushes to `main`.
 
 ### Branch strategy
 
