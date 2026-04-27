@@ -444,41 +444,57 @@ Events to enable: `checkout.session.completed`, `customer.subscription.*`
 
 ## CI/CD
 
-### GitHub Actions
+### Deployment gate — tests must pass before Vercel deploys
 
-**`.github/workflows/api.yml`** — runs on push to `main` and PRs:
-
-```yaml
-- Lint: ruff check apps/api/
-- Type check: mypy apps/api/ --ignore-missing-imports
-- Test: pytest apps/api/tests/ -v --cov=app --cov-report=xml
-- Build: docker build apps/api/
-- Deploy: railway up (main branch only)
-```
-
-**`.github/workflows/web.yml`** — runs on push to `main` and PRs:
-
-```yaml
-- Lint: next lint
-- Type check: tsc --noEmit
-- Build: next build (catches build-time errors)
-- E2E: playwright test (against preview deployment)
-- Deploy: vercel --prod (main branch only, via Vercel GitHub integration)
-```
-
-**Required secrets** (`Settings → Secrets → Actions`):
+`.github/workflows/deploy.yml` runs on every push to `main` and every PR:
 
 ```
-ANTHROPIC_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
-RAILWAY_TOKEN, VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID
+push to main / PR opened
+  └─ Job 1: Playwright E2E (159 tests, Chromium + Firefox, prod URL)
+       ├─ PASS → Job 2: vercel --prod  (main branch only)
+       └─ FAIL → workflow fails, Vercel never receives the deploy
+```
+
+**Vercel auto-deploy from GitHub must be disabled** for this gate to be effective — see setup below.
+
+#### One-time setup
+
+**1. Disable Vercel auto-deploy**
+
+In the [Vercel dashboard](https://vercel.com) → Project → Settings → Git → set **Production Branch** to a branch that doesn't exist (e.g. `deploy-via-ci`), or disconnect the GitHub integration entirely. Deployments will now only happen when the workflow calls `vercel --prod`.
+
+**2. Add GitHub repository secrets**
+
+`Settings → Secrets and variables → Actions → New repository secret`:
+
+| Secret | Where to find it |
+|---|---|
+| `VERCEL_TOKEN` | vercel.com → Account Settings → Tokens |
+| `VERCEL_ORG_ID` | `.vercel/project.json` → `orgId` (run `vercel link` locally first) |
+| `VERCEL_PROJECT_ID` | `.vercel/project.json` → `projectId` |
+
+**3. Enable branch protection on `main`**
+
+`GitHub repo → Settings → Branches → Add rule`:
+- Branch name pattern: `main`
+- ✅ Require status checks to pass before merging
+- ✅ Add status check: `Playwright E2E (production)`
+- ✅ Require branches to be up to date before merging
+- ✅ Do not allow bypassing the above settings
+
+After this, direct pushes to `main` are blocked and any PR that fails E2E cannot be merged.
+
+#### Required secrets summary
+
+```
+VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID
 ```
 
 ### Branch strategy
 
 ```
-main        → production (auto-deploy)
-staging     → staging environment (Railway staging service + Vercel preview)
-feature/*   → PR → CI runs → merge to main
+main        → production (deploys only after all 159 E2E tests pass)
+feature/*   → PR → CI runs E2E → merge to main → deploy
 ```
 
 ---
