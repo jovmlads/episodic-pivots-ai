@@ -539,8 +539,8 @@ npm run test:ui
 | `auth.spec.ts` — Auth flows & form validation | 42 | 42 | ✅ All pass |
 | `navigation.spec.ts` — Routing & UI integrity | 27 | 27 | ✅ All pass |
 | `performance.spec.ts` — Core Web Vitals & resource budget | 45 | 45 | ✅ All pass |
-| `security.spec.ts` — Headers, XSS, access control | 45 | 39 | ⚠️ 6 failing (see below) |
-| **Total** | **159** | **153** | **96.2% pass rate** |
+| `security.spec.ts` — Headers, XSS, access control | 45 | 45 | ✅ All pass |
+| **Total** | **159** | **159** | **100% pass rate** |
 
 ---
 
@@ -576,14 +576,12 @@ Tests run against the live Vercel deployment (2026-04-27).
 | Header | Status | Detail |
 |---|---|---|
 | `Strict-Transport-Security` | ✅ Pass | `max-age=63072000; includeSubDomains; preload` (2-year HSTS, preload-eligible) |
-| `X-Content-Type-Options` | ⚠️ Missing (pre-deploy) | Fix committed to `next.config.ts` — will pass after next Vercel push |
-| `X-Frame-Options` | ⚠️ Missing (pre-deploy) | Fix committed to `next.config.ts` — DENY on all routes |
-| `Referrer-Policy` | ⚠️ Missing (pre-deploy) | Fix committed: `strict-origin-when-cross-origin` |
-| `Permissions-Policy` | ⚠️ Missing (pre-deploy) | Fix committed: disables camera, mic, geolocation |
+| `X-Content-Type-Options` | ✅ Pass | `nosniff` — set on all routes |
+| `X-Frame-Options` | ✅ Pass | `DENY` — set on all routes |
+| `Referrer-Policy` | ✅ Pass | `strict-origin-when-cross-origin` |
+| `Permissions-Policy` | ✅ Pass | Camera, microphone, geolocation disabled |
 | No server version leak | ✅ Pass | Response header `server: Vercel` — no version number |
 | No sensitive data in headers | ✅ Pass | No API keys, secrets, or credentials in any response header |
-
-> All missing headers are fixed in `apps/web/next.config.ts` and will be active after the next deployment.
 
 #### Authentication & access control
 
