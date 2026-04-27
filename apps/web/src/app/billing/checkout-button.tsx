@@ -26,7 +26,7 @@ export default function CheckoutButton({ userId }: { userId: string }) {
       disabled={loading}
       className="w-full bg-primary text-primary-foreground py-3 rounded font-medium hover:opacity-90 disabled:opacity-50 transition-opacity"
     >
-      {loading ? "Redirecting..." : "Subscribe — $X/month"}
+      {loading ? "Redirecting..." : "Subscribe — $0.01/month"}
     </button>
   );
 }

@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     mode: "subscription",
     payment_method_types: ["card"],
     line_items: [{ price: process.env.STRIPE_PRICE_ID!, quantity: 1 }],
-    success_url: `${origin}/dashboard?checkout=success`,
+    success_url: `${origin}/api/checkout/verify?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${origin}/billing`,
     metadata: { user_id },
   });
