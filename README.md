@@ -2,8 +2,6 @@
 
 **Live:** [https://episodic-pivots-ai.vercel.app](https://episodic-pivots-ai.vercel.app) · [![E2E → Deploy](https://github.com/jovmlads/episodic-pivots-ai/actions/workflows/deploy.yml/badge.svg)](https://github.com/jovmlads/episodic-pivots-ai/actions/workflows/deploy.yml)
 
-> Production deploys are gated behind the full Playwright E2E suite (159 tests, Chromium + Firefox). The workflow in `.github/workflows/deploy.yml` runs tests first — `vercel --prod` only fires if they all pass. See [CI/CD](#cicd) for setup.
-
 ## Overview
 
 End-to-end intelligent AI system for analyzing pre-market stock movers, built around a multi-agent LLM pipeline and a full-stack web application.
