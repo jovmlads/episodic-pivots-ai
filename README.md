@@ -740,7 +740,9 @@ HTML report is written to `apps/web/playwright-report-prod/`. JSON results at `a
 
 ## AI Component Evaluations
 
-Enterprise-grade performance, metrics, evals, and security assessment for all four AI agents. Measurements derived from code instrumentation and production API characteristics.
+Performance, metrics, evals, and security assessment for all four AI agents.
+
+Sections marked **measured (2026-04-27)** contain real numbers from live API calls run via `apps/api/tests/eval_agents.py`. All other figures (orchestrator wall times, pgvector query latency, email dispatch) are **estimates** derived from the concurrency model and published service benchmarks — not measured.
 
 ### Model selection
 
