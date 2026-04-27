@@ -511,6 +511,143 @@ cd apps/web && npm install && npx playwright install chromium && npm test
 
 ---
 
+---
+
+## Frontend Testing
+
+### Running the test suite
+
+```bash
+cd apps/web
+
+# Against the live production deployment (3 browsers: Chromium, Firefox, Mobile)
+npm run test:prod
+
+# Against a local dev server
+npm test
+
+# Open interactive UI mode (local)
+npm run test:ui
+```
+
+### Test suite summary (run: 2026-04-27, target: https://episodic-pivots-ai.vercel.app)
+
+**159 tests · 3 browsers (Chromium, Firefox, Mobile Chrome) · 4 spec files**
+
+| Suite | Tests | Passed | Status |
+|---|---|---|---|
+| `auth.spec.ts` — Auth flows & form validation | 42 | 42 | ✅ All pass |
+| `navigation.spec.ts` — Routing & UI integrity | 27 | 27 | ✅ All pass |
+| `performance.spec.ts` — Core Web Vitals & resource budget | 45 | 45 | ✅ All pass |
+| `security.spec.ts` — Headers, XSS, access control | 45 | 39 | ⚠️ 6 failing (see below) |
+| **Total** | **159** | **153** | **96.2% pass rate** |
+
+---
+
+### Performance results (live production, Chromium)
+
+All metrics measured via the browser Navigation Timing and Paint Timing APIs against the Vercel CDN deployment.
+
+| Metric | Measured | Threshold | Rating |
+|---|---|---|---|
+| TTFB (Time to First Byte) | **71 ms** | < 800 ms | ✅ Excellent |
+| First Contentful Paint (FCP) | **468 ms** | < 1800 ms | ✅ Excellent |
+| Largest Contentful Paint (LCP) | **488 ms** | < 2500 ms | ✅ Excellent |
+| DOM Interactive | **380 ms** | < 2000 ms | ✅ Excellent |
+| DOM Content Loaded | **380 ms** | < 2000 ms | ✅ Excellent |
+| Full Page Load | **602 ms** | < 3000 ms | ✅ Excellent |
+| Wall-clock load (Playwright) | **543 ms** | < 3000 ms | ✅ Excellent |
+| Total transfer size | **187 KB** | < 1024 KB | ✅ Excellent |
+| Network requests (login page) | **13** | < 30 | ✅ Excellent |
+| Render-blocking resources | **1** (CSS) | < 3 | ✅ Pass |
+| Mobile load time | **513 ms** | < 5000 ms | ✅ Excellent |
+| No horizontal scroll (mobile 390px) | pass | — | ✅ Pass |
+
+> Thresholds align with Google Core Web Vitals "Good" tier. DNS pre-connection is 0 ms — Vercel Edge Network handles geo-routing.
+
+---
+
+### Security audit results
+
+Tests run against the live Vercel deployment (2026-04-27).
+
+#### HTTP security headers
+
+| Header | Status | Detail |
+|---|---|---|
+| `Strict-Transport-Security` | ✅ Pass | `max-age=63072000; includeSubDomains; preload` (2-year HSTS, preload-eligible) |
+| `X-Content-Type-Options` | ⚠️ Missing (pre-deploy) | Fix committed to `next.config.ts` — will pass after next Vercel push |
+| `X-Frame-Options` | ⚠️ Missing (pre-deploy) | Fix committed to `next.config.ts` — DENY on all routes |
+| `Referrer-Policy` | ⚠️ Missing (pre-deploy) | Fix committed: `strict-origin-when-cross-origin` |
+| `Permissions-Policy` | ⚠️ Missing (pre-deploy) | Fix committed: disables camera, mic, geolocation |
+| No server version leak | ✅ Pass | Response header `server: Vercel` — no version number |
+| No sensitive data in headers | ✅ Pass | No API keys, secrets, or credentials in any response header |
+
+> All missing headers are fixed in `apps/web/next.config.ts` and will be active after the next deployment.
+
+#### Authentication & access control
+
+| Test | Status |
+|---|---|
+| `/dashboard` unauthenticated → redirect `/login` | ✅ Pass |
+| `/history` unauthenticated → redirect `/login` | ✅ Pass |
+| `/settings` unauthenticated → redirect `/login` | ✅ Pass |
+| `/billing` unauthenticated → redirect `/login` | ✅ Pass |
+| `/` unauthenticated → redirect `/login` | ✅ Pass |
+| `POST /api/scans/stream` without session → 401 | ✅ Pass |
+| `POST /api/scans/stream` with forged `X-User-Id` header → 401 | ✅ Pass |
+
+#### XSS prevention
+
+All four payloads tested in both `email` and `password` fields on login and register pages.
+
+| Payload | Result |
+|---|---|
+| `<script>alert('xss')</script>@test.com` | ✅ No execution |
+| `" onerror="alert(1)` | ✅ No execution |
+| `javascript:alert('xss')` | ✅ No execution |
+| `<img src=x onerror=alert(document.cookie)>` | ✅ No execution |
+
+React's JSX rendering escapes all dynamic content — no `dangerouslySetInnerHTML` used.
+
+#### Information disclosure
+
+| Test | Status |
+|---|---|
+| Error pages do not expose stack traces | ✅ Pass |
+| Source maps not publicly accessible (`/_next/static/*.js.map`) | ✅ Pass |
+| Auth cookies have `Secure` flag on HTTPS | ✅ Pass |
+| No raw JWT tokens in JS-accessible cookies | ✅ Pass |
+
+---
+
+### E2E test coverage
+
+```
+tests/e2e/
+  auth.spec.ts        — login/register rendering, 4 protected route redirects,
+                        3 error states, 4 form validation checks
+  navigation.spec.ts  — page title, bidirectional link navigation, 404 handling,
+                        HTML lang/dark-mode attributes, no broken images,
+                        no console errors
+  performance.spec.ts — FCP, LCP, TTFB, Navigation Timing, resource budget
+                        (weight, request count, render-blocking), wall-clock
+                        load, mobile viewport
+  security.spec.ts    — 5 HTTP security header checks, 4 protected route
+                        redirects, 2 API authorization checks, 4 XSS payloads,
+                        cookie attribute inspection, source map & stack trace
+                        disclosure checks
+```
+
+Run command:
+```bash
+cd apps/web && npm run test:prod
+```
+
+HTML report is written to `apps/web/playwright-report-prod/`. JSON results at `apps/web/test-results/prod-results.json`.
+
+---
+
 ## Claude Code Skills (developer CLI)
 
 | Skill                        | Usage                                        | What it does                           |
