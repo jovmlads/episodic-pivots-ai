@@ -1,6 +1,6 @@
 ---
 name: screen
-description: Convert natural language to a screener config. Usage: /screen "scan premarket gainers over 5% with small cap"
+description: "Convert natural language to a screener config. Usage: /screen 'scan premarket gainers over 5% with small cap'"
 ---
 
 Convert natural language screening criteria into a TradingView screener config using the Episodic Pivot screener config producer agent.

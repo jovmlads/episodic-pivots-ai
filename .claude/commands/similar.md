@@ -1,6 +1,6 @@
 ---
 name: similar
-description: Find similar past setups for a scan result via RAG. Usage: /similar <result_id> <user_id>
+description: "Find similar past setups for a scan result via RAG. Usage: /similar <result_id> <user_id>"
 ---
 
 Find historically similar catalyst setups for a given scan result using pgvector RAG search.

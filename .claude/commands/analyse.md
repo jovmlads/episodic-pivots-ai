@@ -1,6 +1,6 @@
 ---
 name: analyse
-description: Run AI catalyst analysis for a ticker against today's news. Usage: /analyse TICKER [pm_change%]
+description: "Run AI catalyst analysis for a ticker against today's news. Usage: /analyse TICKER [pm_change%]"
 ---
 
 Run news catalyst analysis for the given ticker using the Episodic Pivot news analyser agent.
