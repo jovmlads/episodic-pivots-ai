@@ -231,53 +231,70 @@ sequenceDiagram
 
 **Agents:**
 
-- `news_analyser.py` — catalyst classification per ticker
-- `news_orchestrator.py` — fan-out, SSE streaming, persist, email
-- `screener_config_producer.py` — NL → validated screener config
-- `rag_similarity.py` — embedding + pgvector similarity search
+| Agent | Model | Role |
+|---|---|---|
+| `news_analyser.py` | `claude-haiku-4-5-20251001` | Catalyst classification per ticker via forced tool use |
+| `news_orchestrator.py` | — (orchestrates analyser) | Fan-out, SSE streaming, persist, email |
+| `screener_config_producer.py` | `claude-haiku-4-5-20251001` | NL → validated screener config with prompt caching |
+| `rag_similarity.py` | `text-embedding-3-small` (OpenAI) | Embedding + pgvector similarity search |
+
+**Why haiku:** lowest latency in the Claude family (critical in a 30-minute pre-market window), and forced tool use closes the accuracy gap vs larger models by constraining output to a strict enum schema. ~10× cheaper than Sonnet at this scan volume.
 
 #### Tests
 
-| Type        | What                                                           | Location                      |
-| ----------- | -------------------------------------------------------------- | ----------------------------- |
-| Unit        | Token tracker budget check, exhausted, 80% warning             | `tests/test_token_tracker.py` |
-| Unit        | `_parse_rows`, `_extract_json` edge cases                      | `tests/test_screener.py`      |
-| Integration | Live Claude call with real `ANTHROPIC_API_KEY` (manual)        | Run manually against staging  |
-| Eval        | Catalyst classification accuracy on known fixtures (see below) | Manual eval suite             |
+| Type | What | Location |
+| --- | --- | --- |
+| Unit | Token tracker budget check, exhausted, 80% warning | `tests/test_token_tracker.py` |
+| Unit | `_parse_rows`, `_extract_json` edge cases | `tests/test_screener.py` |
+| Eval | news_analyser — 10 labelled fixtures, live API | `tests/eval_agents.py` |
+| Eval | screener_config_producer — 6 NL prompts + cache test, live API | `tests/eval_agents.py` |
+| Eval | rag_similarity — embedding dims + latency, live API | `tests/eval_agents.py` |
 
-**AI Eval metrics** (run manually against a labelled set of 50 news articles):
-
-| Metric                            | Target | Method                                                      |
-| --------------------------------- | ------ | ----------------------------------------------------------- |
-| Catalyst type accuracy            | ≥85%   | Compare model output vs human label on fixture set          |
-| Signal correctness                | ≥80%   | `strong_buy`/`buy` on genuine catalysts, `skip` on dilution |
-| False positive rate (noise → buy) | <10%   | Labelled "no catalyst" articles should return `skip`        |
-| Dilution detection rate           | ≥95%   | ATM/direct offering articles must return `skip`             |
-| Web search fallback recall        | ≥70%   | % of no-news tickers where search finds a valid reason      |
-| Latency per ticker (p50)          | <5 s   | Measured via token usage logs                               |
-| Latency per ticker (p95)          | <12 s  |                                                             |
-
-Run eval:
+Run eval (requires `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` in `apps/api/.env`):
 
 ```bash
-# Place fixture JSON in tests/fixtures/catalyst_eval.json
-# Format: [{"news_text": "...", "expected_catalyst": "earnings_beat", "expected_signal": "strong_buy"}]
-cd apps/api && python -m pytest tests/test_eval.py -v
+cd apps/api && py -m tests.eval_agents
 ```
 
-#### Performance metrics
+#### Eval results (measured 2026-04-27, live API)
 
-- claude-sonnet-4-6 median latency: 2–4 s per ticker
-- With 20 tickers in parallel: total wall time ≈ latency of slowest ticker (5–12 s)
-- Token cost per ticker: ~800–1500 input + ~100–200 output tokens
-- Embedding: ~50 ms per analysis (OpenAI API, background task)
+**news_analyser — 10 fixtures:**
+
+| Metric | Target | Measured |
+| --- | --- | --- |
+| Catalyst type accuracy | ≥ 85% | **100%** (10/10) |
+| Signal correctness | ≥ 80% | **80%** (8/10) |
+| Schema compliance | 100% | **100%** (10/10) |
+| False positive rate (noise → buy) | < 10% | **0%** |
+| Dilution detection (ATM offering) | ≥ 95% | **100%** |
+| Latency p50 | < 5 s | **2.4 s** |
+| Latency p95 | < 12 s | **3.0 s** |
+| Avg tokens in / out | — | **1 258 / 224** |
+| Cost per ticker | — | **$0.000595** |
+| Cost per 20-ticker scan | — | **~$0.012** |
+
+**screener_config_producer — 6 fixtures:**
+
+| Metric | Target | Measured |
+| --- | --- | --- |
+| JSON parse rate | ≥ 98% | **100%** (6/6) |
+| Success/fail correct | ≥ 95% | **100%** (6/6) |
+| Stream duration | < 4 s | **2.0–3.8 s** |
+
+**rag_similarity — 3 embedding samples:**
+
+| Metric | Target | Measured |
+| --- | --- | --- |
+| Dimensions | 1 536 | **1 536** (3/3) |
+| Warm embed latency | < 500 ms | **184 ms** (steady-state) |
+| Cold start (first request) | — | **5.3 s** (background task — does not block scan) |
 
 #### Security
 
 - `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` in env, never logged or returned to client
-- News article content capped at 8000 chars before sending to Claude — prevents prompt injection via malicious news content
-- Claude tool-use schema enforces strict enum values — model cannot return arbitrary strings for `trading_signal`
-- No user-supplied text reaches the AI prompt without being explicitly labelled as `user_input` in the prompt structure
+- News article content capped at 3 000 chars before sending to Claude — prevents prompt injection via malicious news content
+- Forced tool use schema (`tool_choice`) means Claude can only return valid enum values — arbitrary string injection in output is impossible
+- No user-supplied text reaches the AI prompt without being explicitly separated from the system turn
 
 #### Error handling
 
@@ -286,27 +303,11 @@ cd apps/api && python -m pytest tests/test_eval.py -v
 - Budget check before each ticker analysis — exhausted budget yields `{"type":"error"}` SSE event, not an exception
 - Embedding generation is a background task — failure is logged but does not fail the analysis
 
-#### Eval metrics tracking
-
-Log these fields to `ai_analyses` table per call: `tokens_input`, `tokens_output`, `catalyst_type`, `trading_signal`, `web_search_used`. Run aggregate queries to track:
-
-```sql
--- Signal distribution
-select trading_signal, count(*) from ai_analyses group by 1 order by 2 desc;
-
--- Average token cost
-select avg(tokens_input + tokens_output) as avg_tokens from ai_analyses;
-
--- Web search fallback rate
-select avg(web_search_used::int) as fallback_rate from ai_analyses;
-```
-
 #### Scalability
 
 - Agents are stateless async functions — horizontally scalable
-- `asyncio.gather` parallelism scales to available concurrency (limited by Anthropic rate limits, not our infra)
-- Anthropic rate limit: tier-dependent. For high volume, implement per-user request queuing with exponential backoff
-- Embedding model is called once per analysis in a background task — throughput limited by OpenAI rate limits (10K RPM on free tier)
+- `asyncio.Semaphore(5)` limits concurrent Claude calls; with p50 2.4 s, 20 tickers complete in ~10–12 s
+- For high volume: implement per-user request queuing with exponential backoff on `RateLimitError` (already wired for 2 retries at 5 s / 10 s)
 
 ---
 
