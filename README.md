@@ -38,56 +38,50 @@ Episodic Pivot automates the full pipeline: screen TradingView for gap/pre-marke
 
 ```mermaid
 graph TB
-    subgraph Browser["Browser"]
-        UI["Next.js App Router\nLogin · Dashboard · History\nSettings · Billing"]
+    UI[Browser / Next.js App Router]
+
+    subgraph Vercel
+        MW[Middleware - Auth gate]
+        BFF[API Routes - BFF]
     end
 
-    subgraph Vercel["Vercel — Next.js 15"]
-        MW["Middleware\nAuth gate + trial check"]
-        BFF["API Routes (BFF)\nSSE proxy · Stripe webhook\nNotification settings"]
+    subgraph Railway
+        ORCH[news_orchestrator]
+        ANALYSER[news_analyser]
+        SCRAPER[TradingView scraper]
+        SCHED[APScheduler]
+        RAG[rag_similarity]
+        PRODUCER[screener_config_producer]
     end
 
-    subgraph Railway["Railway — FastAPI (Docker)"]
-        ORCH["news_orchestrator.py\nFan-out · SSE stream · persist · email"]
-        ANALYSER["news_analyser.py\nCatalyst classification per ticker"]
-        SCRAPER["TradingView screener\nPre-market movers + news URLs"]
-        SCHED["APScheduler\nUser-defined cron jobs"]
-        RAG["rag_similarity.py\nEmbedding + similarity search"]
-        PRODUCER["screener_config_producer.py\nNL → screener config"]
+    subgraph Supabase
+        AUTH[Auth / JWT]
+        DB[(Postgres + pgvector)]
     end
 
-    subgraph Supabase["Supabase"]
-        AUTH["Auth / JWT"]
-        DB[("Postgres 15\nRLS on all tables")]
-        VEC["pgvector\nIVFFlat index\n(embeddings)"]
-    end
+    TV[TradingView]
+    CLAUDE[Anthropic Claude]
+    OAI[OpenAI Embeddings]
+    STRIPE[Stripe]
+    RESEND[Resend]
 
-    subgraph External["External APIs"]
-        TV["TradingView"]
-        CLAUDE["Anthropic Claude\nclaude-sonnet-4-6"]
-        OAI["OpenAI\ntext-embedding-3-small"]
-        STRIPE["Stripe\nCheckout · Webhooks"]
-        RESEND["Resend\nTransactional email"]
-    end
-
-    UI -->|"HTTPS + Supabase cookie"| MW
-    MW -->|"validate JWT"| AUTH
+    UI --> MW
+    MW --> AUTH
     MW --> BFF
-    BFF -->|"POST X-User-Id (server-side only)"| ORCH
+    BFF -->|POST with X-User-Id| ORCH
     BFF --> STRIPE
-    SCHED -->|"cron trigger"| ORCH
+    BFF --> DB
+    BFF --> PRODUCER
+    SCHED --> ORCH
     ORCH --> SCRAPER
     SCRAPER --> TV
-    ORCH -->|"asyncio.gather"| ANALYSER
+    ORCH -->|asyncio.gather| ANALYSER
     ANALYSER --> CLAUDE
-    ANALYSER -->|"persist"| DB
+    ANALYSER --> DB
     ORCH --> RAG
     RAG --> OAI
-    RAG --> VEC
+    RAG --> DB
     ORCH --> RESEND
-    BFF --> DB
-    UI -->|"PRODUCER stream"| BFF
-    BFF --> PRODUCER
     PRODUCER --> CLAUDE
 ```
 
@@ -102,36 +96,36 @@ graph TB
 ```mermaid
 sequenceDiagram
     actor User
-    participant Next.js
+    participant NextJS as Next.js
     participant FastAPI
     participant TradingView
     participant Claude
     participant Supabase
     participant Resend
 
-    User->>Next.js: Click "Run Scan"
-    Next.js->>Next.js: Validate Supabase session (middleware)
-    Next.js->>FastAPI: POST /scans/trigger {config_id} + X-User-Id
-    FastAPI->>Supabase: Load screener config (filters, thresholds)
+    User->>NextJS: Click Run Scan
+    NextJS->>NextJS: Validate Supabase session
+    NextJS->>FastAPI: POST /scans/trigger + X-User-Id
+    FastAPI->>Supabase: Load screener config
     FastAPI->>TradingView: Run screener with user filters
-    TradingView-->>FastAPI: Ticker list [AAPL, TSLA, ...]
-    FastAPI-->>Next.js: SSE {type:"start", total:N}
-    Next.js-->>User: "Scanning — N tickers"
+    TradingView-->>FastAPI: Ticker list
+    FastAPI-->>NextJS: SSE start event
+    NextJS-->>User: Scanning N tickers
 
-    FastAPI->>TradingView: Fetch news URLs (parallel, per ticker)
+    FastAPI->>TradingView: Fetch news URLs per ticker
 
-    par asyncio.gather — one coroutine per ticker
-        FastAPI->>Claude: Analyse news article (tool use)
-        Claude-->>FastAPI: {catalyst_type, trading_signal, analysis_text}
-        FastAPI-->>Next.js: SSE {type:"result", ticker, signal, analysis}
-        Next.js-->>User: Live result row appears
-        FastAPI->>Supabase: INSERT scan_result + ai_analysis
-        FastAPI-)Supabase: Background: generate embedding → pgvector
+    par asyncio.gather - one task per ticker
+        FastAPI->>Claude: Analyse news article
+        Claude-->>FastAPI: catalyst + signal + analysis
+        FastAPI-->>NextJS: SSE result event
+        NextJS-->>User: Live result row
+        FastAPI->>Supabase: INSERT scan_result and ai_analysis
+        FastAPI-->>Supabase: Background - generate embedding
     end
 
-    FastAPI-->>Next.js: SSE {type:"complete", total_results, total_tokens}
-    FastAPI->>Resend: Send scan report email
-    Next.js-->>User: "Scan complete — N result(s)"
+    FastAPI-->>NextJS: SSE complete event
+    FastAPI->>Resend: Send email report
+    NextJS-->>User: Scan complete
 ```
 
 ### RAG similarity flow
@@ -139,18 +133,18 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     actor User
-    participant Next.js
+    participant NextJS as Next.js
     participant FastAPI
-    participant OpenAI
+    participant Supabase
     participant pgvector
 
-    User->>Next.js: Click "Find Similar" on a result
-    Next.js->>FastAPI: GET /analyses/similar?result_id=X
-    FastAPI->>Supabase: Fetch stored embedding for result X
-    FastAPI->>pgvector: match_analyses() RPC — cosine similarity search
+    User->>NextJS: Click Find Similar on a result
+    NextJS->>FastAPI: GET /analyses/similar?result_id=X
+    FastAPI->>Supabase: Fetch stored embedding for result
+    FastAPI->>pgvector: match_analyses RPC - cosine similarity
     pgvector-->>FastAPI: Top-K similar past analyses
-    FastAPI-->>Next.js: Similar setups with scores
-    Next.js-->>User: Similar historical results panel
+    FastAPI-->>NextJS: Similar setups with scores
+    NextJS-->>User: Similar historical results panel
 ```
 
 ---
@@ -534,11 +528,11 @@ Events to enable: `checkout.session.completed`, `customer.subscription.*`
 
 ```mermaid
 flowchart LR
-    A["git push main\nor PR opened"] --> B["GitHub Actions\ndeploy.yml"]
-    B --> C["Job 1 — Playwright E2E\n159 tests\nChromium + Firefox\nLive production URL"]
-    C -- "All 159 pass" --> D["Job 2 — Deploy\nvercel --prod\n(main branch only)"]
-    C -- "Any test fails" --> E["Workflow fails\n🚫 No deploy"]
-    D --> F["episodic-pivots-ai\n.vercel.app"]
+    A[git push to main] --> B[GitHub Actions]
+    B --> C[Playwright E2E - 159 tests - Chromium and Firefox]
+    C -->|All pass| D[vercel --prod]
+    C -->|Any fail| E[Workflow fails - no deploy]
+    D --> F[episodic-pivots-ai.vercel.app]
 ```
 
 `.github/workflows/deploy.yml` — what it does:
