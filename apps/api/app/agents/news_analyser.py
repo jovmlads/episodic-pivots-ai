@@ -22,16 +22,20 @@ logger = logging.getLogger(__name__)
 client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key, max_retries=0)
 
 POSITIVE_CATALYSTS = [
-    "earnings_beat", "guidance_raise", "contract_win", "partnership",
-    "analyst_upgrade", "fda_approval", "merger_acquisition_target",
-    "buyback", "dividend_initiation", "product_launch",
+    "earnings_beat", "guidance_raise", "contract_win", "new_order", "partnership",
+    "analyst_upgrade", "fda_approval", "drug_marketing_tieup",
+    "merger_acquisition_target", "buyback", "dividend_initiation", "product_launch",
+    "sector_momentum", "regulatory_change", "natural_disaster_beneficiary",
+    "commodity_shortage", "commodity_price_move", "rate_increase_beneficiary",
+    "mining_exploration", "oil_gas_resource",
 ]
 NEGATIVE_CATALYSTS = [
     "earnings_miss", "guidance_cut", "dilution", "legal_issue",
     "analyst_downgrade", "fda_rejection", "ceo_resignation",
     "accounting_irregularity",
 ]
-ALL_CATALYSTS = POSITIVE_CATALYSTS + NEGATIVE_CATALYSTS + ["none"]
+NEUTRAL_CATALYSTS = ["media_story"]
+ALL_CATALYSTS = POSITIVE_CATALYSTS + NEGATIVE_CATALYSTS + NEUTRAL_CATALYSTS + ["none"]
 
 ANALYSIS_SCHEMA = {
     "type": "object",
@@ -55,18 +59,130 @@ Analyse the provided news/context and determine:
 2. Whether the catalyst is a genuine fundamental driver (not just noise)
 3. The likely direction of sustained price movement
 
-Rules:
-- Dilution (ATM offering, shelf registration, direct offering) → trading_signal: skip (for longs)
+=== GENERAL RULES ===
+- Dilution (ATM offering, shelf registration, direct offering) → trading_signal: skip
 - Takeover/buyout target → trading_signal: skip (gap already priced in)
-- Genuine earnings beat with raised guidance → strong_buy
-- Revenue miss even if EPS beat → watch or skip
-- FDA approval of major drug → strong_buy
-- FDA rejection → strong_short
+- Buyout rumour (unconfirmed) → trading_signal: skip
 - Analyst upgrade alone (no fundamental change) → watch
+- Media story (Barron's, Cramer, Forbes etc.) → catalyst_type: media_story, trading_signal: watch (low success rate)
 - No clear catalyst found → catalyst_type: none, trading_signal: skip
 
+=== PRICE RUN-UP WARNING ===
+If the stock has advanced 20%+ over the prior 1–3 months BEFORE the news, treat with caution regardless of how positive the catalyst appears. A large prior run means the news may be an exit liquidity event — insiders who knew about the news in advance could be distributing shares to retail buyers on the positive headline.
+Ideal setup: stock has trended DOWN for ~1 month OR been sideways for 3–6 months before the catalyst.
+If a 20%+ prior run is indicated: note the caution explicitly in analysis_text and bias signal toward watch rather than buy.
+
+=== EARNINGS BEATS ===
+A genuine earnings beat must show BIG growth numbers:
+- Require mid/high or triple-digit EPS and revenue growth YoY
+- Must show a significant beat to analyst consensus (not just 1–2% beat)
+- Raised full-year guidance amplifies the signal → strong_buy
+- Revenue miss even if EPS beat → watch or skip
+- Modest EPS beat (<10% beat, low single-digit growth) → watch, not strong_buy
+
+=== NON-EARNINGS EPISODE TYPES (EPs) ===
+new_order: Common in defense, heavy construction, aeronautics, heavy engineering. Large order or series of orders trigger big moves; current financials do not matter.
+
+sector_momentum: Happens in later stages of a sector-wide bull run when almost all stocks in the sector break out. Very profitable short-term but exit before they crash. Look for top sectors by IBD relative strength or MDT top-11 sectors.
+
+regulatory_change: Government policy change driving EP (e.g. subsidy announcement for a sector). Current earnings/financials do not matter.
+
+fda_approval: Extremely volatile; stocks can double/triple/10x. Developmental stage companies. Require 10x+ average volume surge; first 30 min or pre-market volume should be 4–5x 100-day average → strong_buy but caution on position size.
+
+drug_marketing_tieup: Small developmental company ties up with large pharma for joint marketing/rights deal. Deals with $250M+ upfront payments tend to produce strong EPs. Require 10x+ average volume surge. Upfront payment of ~$10M with large biobucks = weak deal → watch.
+
+natural_disaster_beneficiary: Natural disaster / war / disease creates EP in companies likely to benefit. Often speculative. Require high volume confirmation.
+
+commodity_shortage: Shortage in commodity markets (coal, metals, grains) leads to EPs in related stocks. Can produce very large moves.
+
+commodity_price_move: Sharp move in underlying commodity price drives related equities (e.g. Baltic Dry Index spike → shipping stocks; metal spot price surge → miners).
+
+rate_increase_beneficiary: Sharp rate/price increases in commodity or freight sectors (e.g. shipping rates, energy prices) drive EP in related companies.
+
+media_story: Barron's, Business Week, Forbes, Cramer recommendations → low success rate → trading_signal: watch at best.
+
+=== MINING EXPLORATION RESULTS ===
+When news announces drill or exploration results, evaluate grade quality using this reference:
+
+GRADE REFERENCE (pre-processing, in-ground grades):
+  Cobalt (Co):               Low <1%        Medium 1–2%          High >2%
+  Copper (Cu):               Low <0.5%      Medium 0.5–1.5%      High >1.5%     Bonanza 10%
+  Gold (Au):                 Low <1.5 g/t   Medium 1.5–5 g/t     High >5 g/t    Bonanza >30 g/t
+  Graphite-Flake (Cg):       Low <8%Cg/<85%C  Medium 8–12%Cg/85–95%C  High >12%Cg/>95%C
+  Graphite-Lump/Vein (Cg):   High >90%Cg/>95%C
+  Iron Ore (Fe):             Low <55%       Medium 56–62%         High >63%
+  Lead (Pb):                 Low <2.5%      Medium 2.5–10%        High >10%
+  Lithium-Brine (Li):        Extreme 1700 ppm
+  Lithium-Hard Rock (Li):    Low <0.9%      Medium 0.9–1.8%       High >1.8%
+  Molybdenum (Mo):           Low <0.15%     Medium 0.15–0.5%      High >0.5%
+  Nickel (Ni):               Low <1%        Medium 1–2%           High >2%       Bonanza 12%
+  Palladium (Pd):            Low <1.5 g/t   Medium 1.5–5 g/t      High >5 g/t
+  Phosphate (PO):            Low 4%         High 40%
+  Platinum (Pt):             Low <1 g/t     Medium 1.5–5 g/t      High >5 g/t
+  Potash (K2O):              Low <20%       Medium 20–25%         High >25%
+  Silver (Ag):               Low <10 g/t    Medium 10–50 g/t      High >50 g/t
+  Uranium (U3O8):            Low <0.15%     Medium 0.15–0.8%      High >0.8%     Extreme 17%
+  Zinc (Zn):                 Low <2.5%      Medium 2.5–10%        High >10%
+
+UNIT CONVERSIONS:
+- MoS2 reported → divide by 1.6681 to get Mo equivalent grade
+- Uranium reported in ppm → divide by 10,000 to convert to percentage
+
+DEPTH GUIDANCE:
+- Preferred open pit depth: 0–70m (cheapest to develop)
+- Max viable open pit: 200–400m (bulk tonnage deposits)
+- Below 100–150m is deep and expensive; requires high commodity prices to be financially viable
+- Shallow lower grades can be more valuable than deeper higher grades — always factor depth into grade assessment
+
+DEPOSIT VALUE ESTIMATION (rough back-of-envelope):
+1. Tonnage = Strike Length (m) × Depth (m) × Width (m) × Specific Gravity
+2. Contained metal = Tonnage × Grade
+3. Convert: copper → ×2,204.62 to pounds; gold → ÷34.2857 to troy oz
+4. Gross metal value = Contained metal × spot commodity price
+5. Adjusted deposit value ≈ 5% of gross value (conservative; accounts for overburden, tailings, ore irregularity)
+6. Mining companies typically trade at 5–10% of adjusted mineral deposit value at acquisition
+
+=== OIL AND GAS RESOURCE ANNOUNCEMENTS ===
+If news announces oil or gas resources after seismic/drilling data:
+
+Formula: RCMHIP = A × NP × P × RF × HS × SF
+  A = Area of structure (sq meters)
+  NP = Net Pay (meters — average vertical thickness holding hydrocarbons)
+  P = Porosity (fraction; typical 15–30%)
+  RF = Recovery Factor (fraction; oil 10–40%, gas 50–80%)
+  HS = Hydrocarbon Saturation (fraction; typical 50–90%)
+  SF = Shrinkage Factor for oil (fraction; typical 0.50–0.95)
+  For gas: replace SF with FVF (Formation Volume Factor — inverse of SF; gas expands 50–350× at surface)
+
+Conversions: ROIP (barrels) = RCMHIP × 6.29 | RGIP (cubic feet) = RCMHIP × 35.3
+Apply 20% discount to any company-provided estimates for conservatism.
+Production quality: Fair onshore 300–1,000 bbl/day, offshore 2,000–5,000 bbl/day; Good onshore 1,000–3,000, offshore 5,000–8,000.
+Production decline: 15–20% p.a.; 20–30% of reserves produced in first 12–18 months.
+
+=== BIOTECH CHECKLIST ===
+For fda_approval, drug_marketing_tieup, partnership, fda_rejection:
+
+POSITIVE signals:
+- Control group in early trials (Phase 1/2) → management confidence
+- Primary efficacy p-values << 0.001 (multiple zeros after decimal)
+- Large pharma partner willing to fund development
+- $150M+ upfront cash plus equity stake → strong confidence signal
+- 10x+ average volume on FDA news; 4–5x volume in first 30 min pre-market
+
+NEGATIVE / AVOID signals:
+- Clinical-stage with no backup programs (single program risk)
+- Big pipeline but no partners → equity dilution ahead
+- Modest upfront (~$10M) with large biobucks for a "platform" → weak deal
+- Pooled data analyses combining separate trials → usually failure
+- CRL (Complete Response Letter) from FDA → usually lethal for drug program
+- Biotech ignoring FDA recommendations to save time/money → red flag
+- Secondary efficacy p-value of 0.048 → skip
+- Long Phase 2 without control group → management lacks confidence in drug
+
+STAGE RISK: Clinical-stage = very risky/volatile (small positions); Commercial-stage = growth stock; FCF > R&D + dividends + buybacks = least risky.
+
 Response must be JSON matching the provided schema.
-Analysis text: 1-3 sentences max, professional analyst tone, no fluff."""
+Analysis text: 2–4 sentences, professional analyst tone. For mining news state the grade classification and depth assessment. For non-earnings EPs state the EP type and volume confirmation. Flag any prior run-up caution explicitly."""
 
 
 @dataclass
@@ -88,8 +204,13 @@ async def analyse_ticker(
     premarket_change_pct: float,
     news_url: str | None,
     news_title: str | None = None,
+    price_trend_1m_pct: float | None = None,
 ) -> AnalysisResult:
-    """Main entry point. Returns structured analysis for one ticker."""
+    """Main entry point. Returns structured analysis for one ticker.
+
+    price_trend_1m_pct: optional 1-month price change prior to today's news.
+    If >=20, a run-up caution warning is injected into the analysis prompt.
+    """
     news_content = None
     web_search_used = False
 
@@ -117,6 +238,7 @@ async def analyse_ticker(
         news_title=news_title,
         news_content=news_content,
         web_search_used=web_search_used,
+        price_trend_1m_pct=price_trend_1m_pct,
     )
 
 
@@ -168,11 +290,16 @@ async def _call_claude(
     news_title: str | None,
     news_content: str | None,
     web_search_used: bool,
+    price_trend_1m_pct: float | None = None,
 ) -> AnalysisResult:
     direction = "up" if premarket_change_pct >= 0 else "down"
+    run_up_line = ""
+    if price_trend_1m_pct is not None and price_trend_1m_pct >= 20:
+        run_up_line = f"Prior 1-month price change: {price_trend_1m_pct:+.1f}% ⚠️ PRIOR RUN-UP WARNING\n"
     prompt = (
         f"Stock: {ticker} ({company_name})\n"
         f"Pre-market move: {premarket_change_pct:+.1f}% ({direction})\n"
+        f"{run_up_line}"
         f"News headline: {news_title or 'N/A'}\n"
         f"News URL: {news_url or 'N/A'}\n\n"
         f"News/Context:\n{news_content or 'No news available.'}\n\n"
