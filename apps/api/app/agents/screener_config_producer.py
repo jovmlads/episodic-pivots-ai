@@ -8,7 +8,7 @@ import json
 import logging
 from typing import AsyncGenerator
 
-from langfuse.anthropic import anthropic
+import anthropic
 
 from app.config import settings
 

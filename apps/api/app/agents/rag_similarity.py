@@ -6,7 +6,7 @@ then searches pgvector for similar past setups.
 from __future__ import annotations
 import logging
 
-from langfuse.openai import AsyncOpenAI
+from openai import AsyncOpenAI
 
 from app.config import settings
 from app.database import get_supabase

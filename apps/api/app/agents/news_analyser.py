@@ -11,9 +11,8 @@ import logging
 import re
 from dataclasses import dataclass
 
+import anthropic
 import httpx
-from langfuse.anthropic import anthropic
-from langfuse.decorators import langfuse_context, observe
 
 from app.config import settings
 
@@ -199,7 +198,6 @@ class AnalysisResult:
     tokens_output: int
 
 
-@observe(name="analyse_ticker")
 async def analyse_ticker(
     ticker: str,
     company_name: str,
@@ -213,9 +211,6 @@ async def analyse_ticker(
     price_trend_1m_pct: optional 1-month price change prior to today's news.
     If >=20, a run-up caution warning is injected into the analysis prompt.
     """
-    langfuse_context.update_current_observation(
-        metadata={"ticker": ticker, "company": company_name, "premarket_change_pct": premarket_change_pct}
-    )
     news_content = None
     web_search_used = False
 
