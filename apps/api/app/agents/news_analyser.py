@@ -6,10 +6,13 @@ Logic mirrors catalyst_analyzer.py from episodic-pivots-ai.
 """
 from __future__ import annotations
 import asyncio
+import base64
 import json
 import logging
 import re
+import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 import anthropic
 import httpx
@@ -230,7 +233,7 @@ async def analyse_ticker(
     if not news_content:
         news_content, web_search_used = await _web_search_fallback(ticker, company_name)
 
-    return await _call_claude(
+    result = await _call_claude(
         ticker=ticker,
         company_name=company_name,
         premarket_change_pct=premarket_change_pct,
@@ -240,6 +243,52 @@ async def analyse_ticker(
         web_search_used=web_search_used,
         price_trend_1m_pct=price_trend_1m_pct,
     )
+    asyncio.create_task(_langfuse_trace(ticker, premarket_change_pct, result))
+    return result
+
+
+async def _langfuse_trace(ticker: str, premarket_change_pct: float, result: "AnalysisResult") -> None:
+    """Fire-and-forget: send trace to Langfuse via HTTP API. Never raises."""
+    if not settings.langfuse_public_key:
+        return
+    try:
+        credentials = base64.b64encode(
+            f"{settings.langfuse_public_key}:{settings.langfuse_secret_key}".encode()
+        ).decode()
+        now = datetime.now(timezone.utc).isoformat()
+        payload = {
+            "batch": [{
+                "id": str(uuid.uuid4()),
+                "type": "trace-create",
+                "timestamp": now,
+                "body": {
+                    "id": str(uuid.uuid4()),
+                    "name": "analyse_ticker",
+                    "timestamp": now,
+                    "input": {"ticker": ticker, "premarket_change_pct": premarket_change_pct},
+                    "output": {
+                        "trading_signal": result.trading_signal,
+                        "catalyst_type": result.catalyst_type,
+                        "sentiment": result.sentiment,
+                        "analysis_text": result.analysis_text,
+                    },
+                    "metadata": {
+                        "tokens_input": result.tokens_input,
+                        "tokens_output": result.tokens_output,
+                        "web_search_used": result.web_search_used,
+                        "model": "claude-haiku-4-5-20251001",
+                    },
+                },
+            }]
+        }
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(
+                f"{settings.langfuse_base_url}/api/public/ingestion",
+                json=payload,
+                headers={"Authorization": f"Basic {credentials}"},
+            )
+    except Exception:
+        pass
 
 
 async def _fetch_url(url: str) -> str | None:
