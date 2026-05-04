@@ -250,6 +250,7 @@ async def analyse_ticker(
 async def _langfuse_trace(ticker: str, premarket_change_pct: float, result: "AnalysisResult") -> None:
     """Fire-and-forget: send trace to Langfuse via HTTP API. Never raises."""
     if not settings.langfuse_public_key:
+        logger.warning("Langfuse trace skipped: langfuse_public_key not set")
         return
     try:
         credentials = base64.b64encode(
@@ -281,14 +282,18 @@ async def _langfuse_trace(ticker: str, premarket_change_pct: float, result: "Ana
                 },
             }]
         }
-        async with httpx.AsyncClient(timeout=10) as client:
-            await client.post(
+        async with httpx.AsyncClient(timeout=10) as c:
+            resp = await c.post(
                 f"{settings.langfuse_base_url}/api/public/ingestion",
                 json=payload,
                 headers={"Authorization": f"Basic {credentials}"},
             )
-    except Exception:
-        pass
+            if resp.status_code >= 400:
+                logger.warning("Langfuse ingestion error %s: %s", resp.status_code, resp.text[:200])
+            else:
+                logger.info("Langfuse trace sent for %s (status %s)", ticker, resp.status_code)
+    except Exception as exc:
+        logger.warning("Langfuse trace failed for %s: %s", ticker, exc)
 
 
 async def _fetch_url(url: str) -> str | None:
