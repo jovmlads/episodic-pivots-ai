@@ -8,16 +8,6 @@ from app.config import settings
 from app.routers import health, scans, analyses, notifications
 from app.services.scheduler import start_scheduler, stop_scheduler
 
-if settings.langfuse_public_key:
-    from langfuse import Langfuse
-    _langfuse = Langfuse(
-        public_key=settings.langfuse_public_key,
-        secret_key=settings.langfuse_secret_key,
-        host=settings.langfuse_base_url,
-    )
-else:
-    _langfuse = None
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s — %(message)s",
@@ -29,8 +19,6 @@ async def lifespan(app: FastAPI):
     start_scheduler()
     yield
     stop_scheduler()
-    if _langfuse:
-        _langfuse.flush()
 
 
 app = FastAPI(
