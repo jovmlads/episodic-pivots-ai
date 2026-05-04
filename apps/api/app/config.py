@@ -1,3 +1,5 @@
+import os
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,6 +17,11 @@ class Settings(BaseSettings):
 
     # TradingView
     tradingview_cookie: str = ""
+
+    # Langfuse (optional — omit to disable AI observability)
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    langfuse_base_url: str = "https://cloud.langfuse.com"
 
     # Email
     resend_api_key: str = ""
@@ -35,3 +42,11 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Bridge .env Langfuse keys into os.environ so the Langfuse SDK auto-detects them.
+# pydantic-settings reads .env but does not set os.environ, so we do it here.
+if settings.langfuse_public_key:
+    os.environ.setdefault("LANGFUSE_PUBLIC_KEY", settings.langfuse_public_key)
+    os.environ.setdefault("LANGFUSE_SECRET_KEY", settings.langfuse_secret_key)
+    os.environ.setdefault("LANGFUSE_BASE_URL", settings.langfuse_base_url)
+    os.environ.setdefault("LANGFUSE_HOST", settings.langfuse_base_url)
