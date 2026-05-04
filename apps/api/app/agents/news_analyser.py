@@ -18,6 +18,12 @@ from app.config import settings
 
 try:
     from langfuse.decorators import langfuse_context, observe
+    langfuse_context.configure(
+        public_key=settings.langfuse_public_key,
+        secret_key=settings.langfuse_secret_key,
+        host=settings.langfuse_base_url,
+        enabled=bool(settings.langfuse_public_key),
+    )
     _LANGFUSE = True
 except Exception:
     _LANGFUSE = False
