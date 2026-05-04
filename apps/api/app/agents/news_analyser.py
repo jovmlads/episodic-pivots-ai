@@ -16,6 +16,15 @@ import httpx
 
 from app.config import settings
 
+try:
+    from langfuse.decorators import langfuse_context, observe
+    _LANGFUSE = True
+except Exception:
+    _LANGFUSE = False
+    def observe(**_):  # no-op decorator if langfuse unavailable
+        def _wrap(f): return f
+        return _wrap
+
 logger = logging.getLogger(__name__)
 
 # max_retries=0: we handle retries ourselves with proper backoff
@@ -198,6 +207,7 @@ class AnalysisResult:
     tokens_output: int
 
 
+@observe(name="analyse_ticker")
 async def analyse_ticker(
     ticker: str,
     company_name: str,
@@ -230,7 +240,7 @@ async def analyse_ticker(
     if not news_content:
         news_content, web_search_used = await _web_search_fallback(ticker, company_name)
 
-    return await _call_claude(
+    result = await _call_claude(
         ticker=ticker,
         company_name=company_name,
         premarket_change_pct=premarket_change_pct,
@@ -240,6 +250,24 @@ async def analyse_ticker(
         web_search_used=web_search_used,
         price_trend_1m_pct=price_trend_1m_pct,
     )
+
+    try:
+        if _LANGFUSE:
+            langfuse_context.update_current_observation(
+                model="claude-haiku-4-5-20251001",
+                usage={"input": result.tokens_input, "output": result.tokens_output},
+                metadata={
+                    "ticker": ticker,
+                    "company": company_name,
+                    "signal": result.trading_signal,
+                    "catalyst": result.catalyst_type,
+                    "web_search_used": result.web_search_used,
+                },
+            )
+    except Exception:
+        pass
+
+    return result
 
 
 async def _fetch_url(url: str) -> str | None:
