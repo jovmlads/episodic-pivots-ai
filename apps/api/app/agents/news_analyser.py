@@ -16,19 +16,6 @@ import httpx
 
 from app.config import settings
 
-_lf = None
-try:
-    if settings.langfuse_public_key:
-        from langfuse import Langfuse
-        _lf = Langfuse(
-            public_key=settings.langfuse_public_key,
-            secret_key=settings.langfuse_secret_key,
-            host=settings.langfuse_base_url,
-        )
-        logger.info("Langfuse tracing enabled")
-except Exception as _e:
-    logger.warning("Langfuse init failed — tracing disabled: %s", _e)
-
 logger = logging.getLogger(__name__)
 
 # max_retries=0: we handle retries ourselves with proper backoff
@@ -224,16 +211,6 @@ async def analyse_ticker(
     price_trend_1m_pct: optional 1-month price change prior to today's news.
     If >=20, a run-up caution warning is injected into the analysis prompt.
     """
-    _trace = None
-    try:
-        if _lf:
-            _trace = _lf.trace(
-                name="analyse_ticker",
-                input={"ticker": ticker, "company": company_name, "premarket_change_pct": premarket_change_pct},
-            )
-    except Exception:
-        pass
-
     news_content = None
     web_search_used = False
 
@@ -253,7 +230,7 @@ async def analyse_ticker(
     if not news_content:
         news_content, web_search_used = await _web_search_fallback(ticker, company_name)
 
-    result = await _call_claude(
+    return await _call_claude(
         ticker=ticker,
         company_name=company_name,
         premarket_change_pct=premarket_change_pct,
@@ -263,27 +240,6 @@ async def analyse_ticker(
         web_search_used=web_search_used,
         price_trend_1m_pct=price_trend_1m_pct,
     )
-
-    try:
-        if _trace:
-            _trace.update(
-                output={
-                    "trading_signal": result.trading_signal,
-                    "catalyst_type": result.catalyst_type,
-                    "sentiment": result.sentiment,
-                    "analysis_text": result.analysis_text,
-                },
-                metadata={
-                    "model": "claude-haiku-4-5-20251001",
-                    "tokens_input": result.tokens_input,
-                    "tokens_output": result.tokens_output,
-                    "web_search_used": result.web_search_used,
-                },
-            )
-    except Exception:
-        pass
-
-    return result
 
 
 async def _fetch_url(url: str) -> str | None:
