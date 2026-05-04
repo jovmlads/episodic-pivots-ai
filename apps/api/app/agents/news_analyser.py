@@ -16,20 +16,18 @@ import httpx
 
 from app.config import settings
 
+_lf = None
 try:
-    from langfuse.decorators import langfuse_context, observe
-    langfuse_context.configure(
-        public_key=settings.langfuse_public_key,
-        secret_key=settings.langfuse_secret_key,
-        host=settings.langfuse_base_url,
-        enabled=bool(settings.langfuse_public_key),
-    )
-    _LANGFUSE = True
-except Exception:
-    _LANGFUSE = False
-    def observe(**_):  # no-op decorator if langfuse unavailable
-        def _wrap(f): return f
-        return _wrap
+    if settings.langfuse_public_key:
+        from langfuse import Langfuse
+        _lf = Langfuse(
+            public_key=settings.langfuse_public_key,
+            secret_key=settings.langfuse_secret_key,
+            host=settings.langfuse_base_url,
+        )
+        logger.info("Langfuse tracing enabled")
+except Exception as _e:
+    logger.warning("Langfuse init failed — tracing disabled: %s", _e)
 
 logger = logging.getLogger(__name__)
 
@@ -213,7 +211,6 @@ class AnalysisResult:
     tokens_output: int
 
 
-@observe(name="analyse_ticker")
 async def analyse_ticker(
     ticker: str,
     company_name: str,
@@ -227,6 +224,16 @@ async def analyse_ticker(
     price_trend_1m_pct: optional 1-month price change prior to today's news.
     If >=20, a run-up caution warning is injected into the analysis prompt.
     """
+    _trace = None
+    try:
+        if _lf:
+            _trace = _lf.trace(
+                name="analyse_ticker",
+                input={"ticker": ticker, "company": company_name, "premarket_change_pct": premarket_change_pct},
+            )
+    except Exception:
+        pass
+
     news_content = None
     web_search_used = False
 
@@ -258,15 +265,18 @@ async def analyse_ticker(
     )
 
     try:
-        if _LANGFUSE:
-            langfuse_context.update_current_observation(
-                model="claude-haiku-4-5-20251001",
-                usage={"input": result.tokens_input, "output": result.tokens_output},
+        if _trace:
+            _trace.update(
+                output={
+                    "trading_signal": result.trading_signal,
+                    "catalyst_type": result.catalyst_type,
+                    "sentiment": result.sentiment,
+                    "analysis_text": result.analysis_text,
+                },
                 metadata={
-                    "ticker": ticker,
-                    "company": company_name,
-                    "signal": result.trading_signal,
-                    "catalyst": result.catalyst_type,
+                    "model": "claude-haiku-4-5-20251001",
+                    "tokens_input": result.tokens_input,
+                    "tokens_output": result.tokens_output,
                     "web_search_used": result.web_search_used,
                 },
             )
