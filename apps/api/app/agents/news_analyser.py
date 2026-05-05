@@ -24,6 +24,11 @@ logger = logging.getLogger(__name__)
 # max_retries=0: we handle retries ourselves with proper backoff
 client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key, max_retries=0)
 
+SIGNAL_SCORES = {
+    "strong_buy": 1.0, "buy": 0.75, "watch": 0.5,
+    "skip": 0.0, "short": 0.25, "strong_short": 0.0,
+}
+
 POSITIVE_CATALYSTS = [
     "earnings_beat", "guidance_raise", "contract_win", "new_order", "partnership",
     "analyst_upgrade", "fda_approval", "drug_marketing_tieup",
@@ -208,6 +213,8 @@ async def analyse_ticker(
     news_url: str | None,
     news_title: str | None = None,
     price_trend_1m_pct: float | None = None,
+    run_id: str = "",
+    user_id: str = "",
 ) -> AnalysisResult:
     """Main entry point. Returns structured analysis for one ticker.
 
@@ -243,12 +250,18 @@ async def analyse_ticker(
         web_search_used=web_search_used,
         price_trend_1m_pct=price_trend_1m_pct,
     )
-    asyncio.create_task(_langfuse_trace(ticker, premarket_change_pct, result))
+    asyncio.create_task(_langfuse_trace(ticker, premarket_change_pct, result, run_id=run_id, user_id=user_id))
     return result
 
 
-async def _langfuse_trace(ticker: str, premarket_change_pct: float, result: "AnalysisResult") -> None:
-    """Fire-and-forget: send trace to Langfuse via HTTP API. Never raises."""
+async def _langfuse_trace(
+    ticker: str,
+    premarket_change_pct: float,
+    result: "AnalysisResult",
+    run_id: str = "",
+    user_id: str = "",
+) -> None:
+    """Fire-and-forget: send trace + generation + scores to Langfuse. Never raises."""
     if not settings.langfuse_public_key:
         logger.warning("Langfuse trace skipped: langfuse_public_key not set")
         return
@@ -257,35 +270,86 @@ async def _langfuse_trace(ticker: str, premarket_change_pct: float, result: "Ana
             f"{settings.langfuse_public_key}:{settings.langfuse_secret_key}".encode()
         ).decode()
         now = datetime.now(timezone.utc).isoformat()
-        payload = {
-            "batch": [{
+        trace_id = str(uuid.uuid4())
+        generation_id = str(uuid.uuid4())
+
+        output = {
+            "trading_signal": result.trading_signal,
+            "catalyst_type": result.catalyst_type,
+            "sentiment": result.sentiment,
+            "analysis_text": result.analysis_text,
+        }
+        batch = [
+            {
                 "id": str(uuid.uuid4()),
                 "type": "trace-create",
                 "timestamp": now,
                 "body": {
-                    "id": str(uuid.uuid4()),
+                    "id": trace_id,
                     "name": "analyse_ticker",
                     "timestamp": now,
+                    "sessionId": run_id or None,
+                    "userId": user_id or None,
                     "input": {"ticker": ticker, "premarket_change_pct": premarket_change_pct},
-                    "output": {
-                        "trading_signal": result.trading_signal,
-                        "catalyst_type": result.catalyst_type,
-                        "sentiment": result.sentiment,
-                        "analysis_text": result.analysis_text,
-                    },
-                    "metadata": {
-                        "tokens_input": result.tokens_input,
-                        "tokens_output": result.tokens_output,
-                        "web_search_used": result.web_search_used,
-                        "model": "claude-haiku-4-5-20251001",
-                    },
+                    "output": output,
+                    "metadata": {"web_search_used": result.web_search_used},
                 },
-            }]
-        }
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "type": "generation-create",
+                "timestamp": now,
+                "body": {
+                    "id": generation_id,
+                    "traceId": trace_id,
+                    "name": "claude_analysis",
+                    "model": "claude-haiku-4-5-20251001",
+                    "modelParameters": {"max_tokens": 512},
+                    "input": {
+                        "ticker": ticker,
+                        "premarket_change_pct": premarket_change_pct,
+                        "news_title": result.news_title,
+                        "web_search_used": result.web_search_used,
+                    },
+                    "output": output,
+                    "usage": {
+                        "input": result.tokens_input,
+                        "output": result.tokens_output,
+                        "unit": "TOKENS",
+                    },
+                    "promptName": "news_analyser",
+                },
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "type": "score-create",
+                "timestamp": now,
+                "body": {
+                    "traceId": trace_id,
+                    "observationId": generation_id,
+                    "name": "signal_strength",
+                    "value": SIGNAL_SCORES.get(result.trading_signal, 0.0),
+                    "dataType": "NUMERIC",
+                    "comment": result.trading_signal,
+                },
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "type": "score-create",
+                "timestamp": now,
+                "body": {
+                    "traceId": trace_id,
+                    "name": "web_search_fallback",
+                    "value": 1.0 if result.web_search_used else 0.0,
+                    "dataType": "NUMERIC",
+                },
+            },
+        ]
+
         async with httpx.AsyncClient(timeout=10) as c:
             resp = await c.post(
                 f"{settings.langfuse_base_url}/api/public/ingestion",
-                json=payload,
+                json={"batch": batch},
                 headers={
                     "Authorization": f"Basic {credentials}",
                     "x-langfuse-ingestion-version": "4",

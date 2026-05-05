@@ -74,7 +74,7 @@ async def run_orchestrator(
         async def _run_one(idx: int, candidate) -> tuple:
             async with sem:
                 nurl, ntitle = news_map.get(candidate.ticker, (None, None))
-                return idx, candidate, await _analyse_one(candidate, nurl, ntitle, user_id)
+                return idx, candidate, await _analyse_one(candidate, nurl, ntitle, user_id, run_id)
 
         tasks = [asyncio.create_task(_run_one(i, c)) for i, c in enumerate(candidates)]
 
@@ -144,7 +144,7 @@ async def run_orchestrator(
         yield {"type": "error", "message": f"Scan failed: {exc}"}
 
 
-async def _analyse_one(candidate: ScanResult, news_url: str | None, news_title: str | None, user_id: str):
+async def _analyse_one(candidate: ScanResult, news_url: str | None, news_title: str | None, user_id: str, run_id: str = ""):
     from app.agents.news_analyser import analyse_ticker
     has_budget, _, _ = check_budget(user_id)
     if not has_budget:
@@ -155,6 +155,8 @@ async def _analyse_one(candidate: ScanResult, news_url: str | None, news_title: 
         premarket_change_pct=candidate.premarket_change_pct,
         news_url=news_url,
         news_title=news_title,
+        run_id=run_id,
+        user_id=user_id,
     )
 
 
