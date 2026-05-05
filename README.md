@@ -180,7 +180,7 @@ sequenceDiagram
 | Email            | Resend                        | 2.4     | SPF/DKIM handled, generous free tier, dead-simple Python API                          |
 | Containerisation | Docker + Compose              | —       | Reproducible local stack, Railway accepts Docker images directly                      |
 | Deployment       | Vercel + Railway              | —       | Zero-ops. Vercel for Next.js native; Railway for Docker with env management           |
-| AI observability | Langfuse                      | 3.x     | Traces, sessions, users, scores, generations, datasets, LLM-as-a-Judge. SDK bypassed — raw HTTP (`httpx`) used to avoid blocking the asyncio event loop |
+| AI observability | Langfuse                      | v4 API  | Traces, sessions, users, scores, generations, datasets, LLM-as-a-Judge. SDK bypassed — raw HTTP (`httpx`) used to avoid blocking the asyncio event loop |
 
 ---
 
