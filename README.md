@@ -180,7 +180,7 @@ sequenceDiagram
 | Email            | Resend                        | 2.4     | SPF/DKIM handled, generous free tier, dead-simple Python API                          |
 | Containerisation | Docker + Compose              | —       | Reproducible local stack, Railway accepts Docker images directly                      |
 | Deployment       | Vercel + Railway              | —       | Zero-ops. Vercel for Next.js native; Railway for Docker with env management           |
-| AI observability | Langfuse                      | 3.x     | Trace every LLM call (input, output, tokens, cost). SDK bypassed — raw HTTP used to avoid blocking the asyncio event loop |
+| AI observability | Langfuse                      | 3.x     | Traces, sessions, users, scores, generations, datasets, LLM-as-a-Judge. SDK bypassed — raw HTTP (`httpx`) used to avoid blocking the asyncio event loop |
 
 ---
 
@@ -339,18 +339,27 @@ The system prompt (field reference + instructions, ~1000 tokens) is marked with 
 
 ### 2c. AI Observability — Langfuse
 
-Every `analyse_ticker` call sends a trace to [Langfuse](https://langfuse.com) via a fire-and-forget `asyncio.create_task` posting directly to the HTTP ingestion API (`httpx.AsyncClient`). The SDK is bypassed — its constructor blocks the asyncio event loop and hangs SSE streams.
+Every `analyse_ticker` call sends a batch to [Langfuse](https://langfuse.com) via fire-and-forget `asyncio.create_task` + `httpx.AsyncClient`. The SDK is bypassed — it blocks the asyncio event loop and hangs SSE streams.
 
-| Field | Value |
+**What's captured per trace:**
+
+| Feature | Detail |
 |---|---|
-| Name | `analyse_ticker` |
-| Input | `ticker`, `premarket_change_pct` |
-| Output | `trading_signal`, `catalyst_type`, `sentiment`, `analysis_text` |
-| Metadata | `tokens_input`, `tokens_output`, `web_search_used`, `model` |
+| Trace | `analyse_ticker` — input (ticker, pm%), output (signal, catalyst, sentiment, analysis) |
+| Session | `run_id` — all tickers from one scan grouped together |
+| User | `user_id` — per-user cost and usage breakdown |
+| Generation | Claude call with model, token usage, linked to `news_analyser` prompt version |
+| Score: `signal_strength` | 0–1 numeric (strong_buy=1.0, buy=0.75, watch=0.5, skip=0.0) |
+| Score: `web_search_fallback` | 1.0 if web search was used instead of article fetch |
+| Prompt | `news_analyser` system prompt versioned in Langfuse — editable in UI |
+| Dataset | `news_analyser_production` — 200 production analyses seeded from Supabase |
+| LLM-as-a-Judge | Evaluator configured in UI; scores `catalyst_signal_alignment` on each trace |
 
 **Env vars:** `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL`. If the key is unset, tracing is skipped silently.
 
-**Viewing:** [cloud.langfuse.com](https://cloud.langfuse.com) → **Tracing** (not Home). Traces appear within ~5 minutes. The `x-langfuse-ingestion-version: 4` header is required to opt into the real-time v4 pipeline — without it data is delayed 10+ minutes.
+**Viewing:** [cloud.langfuse.com](https://cloud.langfuse.com) → **Tracing**. Traces appear within ~5 minutes (`x-langfuse-ingestion-version: 4` header required for the real-time pipeline).
+
+**One-time setup** (prompt + dataset sync): `cd apps/api && py -m scripts.langfuse_setup`
 
 ---
 
