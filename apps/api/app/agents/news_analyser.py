@@ -291,7 +291,7 @@ async def _langfuse_trace(ticker: str, premarket_change_pct: float, result: "Ana
             if resp.status_code >= 400:
                 logger.warning("Langfuse ingestion error %s: %s", resp.status_code, resp.text[:200])
             else:
-                logger.info("Langfuse trace sent for %s (status %s)", ticker, resp.status_code)
+                logger.info("Langfuse trace sent for %s (status %s): %s", ticker, resp.status_code, resp.text[:300])
     except Exception as exc:
         logger.warning("Langfuse trace failed for %s: %s", ticker, exc)
 
