@@ -180,6 +180,7 @@ sequenceDiagram
 | Email            | Resend                        | 2.4     | SPF/DKIM handled, generous free tier, dead-simple Python API                          |
 | Containerisation | Docker + Compose              | —       | Reproducible local stack, Railway accepts Docker images directly                      |
 | Deployment       | Vercel + Railway              | —       | Zero-ops. Vercel for Next.js native; Railway for Docker with env management           |
+| AI observability | Langfuse                      | 3.x     | Trace every LLM call (input, output, tokens, cost). SDK bypassed — raw HTTP used to avoid blocking the asyncio event loop |
 
 ---
 
@@ -338,13 +339,7 @@ The system prompt (field reference + instructions, ~1000 tokens) is marked with 
 
 ### 2c. AI Observability — Langfuse
 
-Every `analyse_ticker` call sends a trace to [Langfuse](https://langfuse.com) for monitoring, cost tracking, and eval review.
-
-**Implementation:** The Langfuse Python SDK cannot be used in this context — its constructor (`Langfuse()`), `@observe` decorator, and drop-in wrappers (`langfuse.anthropic`) all create a background thread with a blocking `requests` session at import or construction time. In a FastAPI async context this blocks the event loop and causes SSE streams to hang indefinitely (the scanner runs but results never stream to the client).
-
-Traces are instead sent via a fire-and-forget `asyncio.create_task` that POSTs directly to the Langfuse HTTP ingestion API using `httpx.AsyncClient`. This adds zero latency to the scan path.
-
-**Trace payload per ticker (`apps/api/app/agents/news_analyser.py` → `_langfuse_trace`):**
+Every `analyse_ticker` call sends a trace to [Langfuse](https://langfuse.com) via a fire-and-forget `asyncio.create_task` posting directly to the HTTP ingestion API (`httpx.AsyncClient`). The SDK is bypassed — its constructor blocks the asyncio event loop and hangs SSE streams.
 
 | Field | Value |
 |---|---|
@@ -353,19 +348,9 @@ Traces are instead sent via a fire-and-forget `asyncio.create_task` that POSTs d
 | Output | `trading_signal`, `catalyst_type`, `sentiment`, `analysis_text` |
 | Metadata | `tokens_input`, `tokens_output`, `web_search_used`, `model` |
 
-**Required environment variables (Railway):**
+**Env vars:** `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL`. If the key is unset, tracing is skipped silently.
 
-```
-LANGFUSE_PUBLIC_KEY=pk-lf-...
-LANGFUSE_SECRET_KEY=sk-lf-...
-LANGFUSE_BASE_URL=https://cloud.langfuse.com
-```
-
-If `LANGFUSE_PUBLIC_KEY` is empty, `_langfuse_trace` logs a warning and returns early — tracing is disabled but the scanner continues normally.
-
-**Viewing traces:** [cloud.langfuse.com](https://cloud.langfuse.com) → **Tracing** (not Home). Traces appear within ~5 minutes. The Home dashboard aggregates data with a longer delay; the Tracing view shows raw events as soon as they are processed.
-
-**Key implementation note — `x-langfuse-ingestion-version: 4`:** Without this header, Langfuse routes data through its legacy ingestion pipeline which applies a 10-minute+ delay. The header is included on every request to opt into the real-time v4 pipeline.
+**Viewing:** [cloud.langfuse.com](https://cloud.langfuse.com) → **Tracing** (not Home). Traces appear within ~5 minutes. The `x-langfuse-ingestion-version: 4` header is required to opt into the real-time v4 pipeline — without it data is delayed 10+ minutes.
 
 ---
 
