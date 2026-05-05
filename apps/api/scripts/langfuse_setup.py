@@ -113,7 +113,7 @@ def sync_dataset(limit: int = 200) -> None:
     for a in analyses:
         scan = scan_map.get(a.get("result_id"), {})
         try:
-            _lf_post("/api/public/v2/dataset-items", {
+            _lf_post("/api/public/dataset-items", {
                 "datasetName": DATASET_NAME,
                 "input": {
                     "ticker": scan.get("ticker", "UNKNOWN"),
@@ -143,6 +143,6 @@ if __name__ == "__main__":
     create_dataset()
     sync_dataset(limit=int(sys.argv[1]) if len(sys.argv) > 1 else 200)
     print("\nDone. Next steps:")
-    print("  Prompts  → langfuse.com → Prompts → edit 'news_analyser' in the UI")
-    print("  Datasets → langfuse.com → Datasets → 'news_analyser_production'")
-    print("  Evals    → langfuse.com → LLM-as-a-Judge → create evaluator (see README)")
+    print("  Prompts  -> langfuse.com -> Prompts -> edit 'news_analyser' in the UI")
+    print("  Datasets -> langfuse.com -> Datasets -> 'news_analyser_production'")
+    print("  Evals    -> langfuse.com -> LLM-as-a-Judge -> create evaluator (see README)")
