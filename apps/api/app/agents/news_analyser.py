@@ -286,7 +286,10 @@ async def _langfuse_trace(ticker: str, premarket_change_pct: float, result: "Ana
             resp = await c.post(
                 f"{settings.langfuse_base_url}/api/public/ingestion",
                 json=payload,
-                headers={"Authorization": f"Basic {credentials}"},
+                headers={
+                    "Authorization": f"Basic {credentials}",
+                    "x-langfuse-ingestion-version": "4",
+                },
             )
             if resp.status_code >= 400:
                 logger.warning("Langfuse ingestion error %s: %s", resp.status_code, resp.text[:200])
