@@ -20,4 +20,3 @@ psutil==6.1.0
 pytest==8.3.4
 pytest-asyncio==0.24.0
 pytest-mock==3.14.0
-deepeval==4.0.2
