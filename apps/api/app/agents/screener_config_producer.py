@@ -142,18 +142,28 @@ async def produce_config_stream(user_input: str) -> AsyncGenerator[dict, None]:
         yield {"type": "error", "message": str(exc)}
 
 
+_EXPECTED_KEYS = {"success", "config", "message", "missing_criteria"}
+
+
 def _extract_json(text: str) -> dict:
     """Extract JSON block from Claude's response."""
+    import re
+
+    def _validate(candidate: dict) -> bool:
+        # Must have 'success' key; all top-level keys must be expected
+        return "success" in candidate and candidate.keys() <= _EXPECTED_KEYS
+
     try:
-        # Try to find JSON in code block
-        import re
         match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
         if match:
-            return json.loads(match.group(1))
-        # Try bare JSON
+            parsed = json.loads(match.group(1))
+            if _validate(parsed):
+                return parsed
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if match:
-            return json.loads(match.group(0))
+            parsed = json.loads(match.group(0))
+            if _validate(parsed):
+                return parsed
     except json.JSONDecodeError:
         pass
     return {"success": False, "message": text, "missing_criteria": []}
